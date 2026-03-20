@@ -616,6 +616,8 @@ void client_animation_next_tick(Client *c) {
 
 	c->is_pending_open_animation = false;
 
+	client_apply_clip(c, factor);
+
 	if (animation_passed >= 1.0) {
 
 		// clear the open action state
@@ -645,8 +647,6 @@ void client_animation_next_tick(Client *c) {
 		// end flush in next frame, not the current frame
 		c->need_output_flush = false;
 	}
-
-	client_apply_clip(c, factor);
 }
 
 void init_fadeout_client(Client *c) {
