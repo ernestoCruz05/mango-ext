@@ -91,6 +91,7 @@
 #include <xcb/xcb_icccm.h>
 #endif
 #include "common/util.h"
+#include <math.h>
 
 /* macros */
 #define MAX(A, B) ((A) > (B) ? (A) : (B))
@@ -115,6 +116,7 @@
 	((C) && (M) && (C)->mon == (M) && ((C)->tags & (M)->tagset[(M)->seltags]))
 #define LENGTH(X) (sizeof X / sizeof X[0])
 #define END(A) ((A) + LENGTH(A))
+#define CANVAS_MAX_TAGS 10
 #define TAGMASK ((1 << LENGTH(tags)) - 1)
 #define LISTEN(E, L, H) wl_signal_add((E), ((L)->notify = (H), (L)))
 #define ISFULLSCREEN(A)                                                        \
@@ -146,9 +148,9 @@ enum { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT };
 
 enum { VERTICAL, HORIZONTAL };
 enum { SWIPE_UP, SWIPE_DOWN, SWIPE_LEFT, SWIPE_RIGHT };
-enum { CurNormal, CurPressed, CurMove, CurResize }; /* cursor */
-enum { XDGShell, LayerShell, X11 };					/* client types */
-enum { AxisUp, AxisDown, AxisLeft, AxisRight };		// 滚轮滚动的方向
+enum { CurNormal, CurPressed, CurMove, CurResize, CurPan }; /* cursor */
+enum { XDGShell, LayerShell, X11 };							/* client types */
+enum { AxisUp, AxisDown, AxisLeft, AxisRight };				// 滚轮滚动的方向
 enum {
 	LyrBg,
 	LyrBottom,
@@ -304,7 +306,8 @@ typedef struct {
 struct Client {
 	/* Must keep these three elements in this order */
 	uint32_t type; /* XDGShell or X11* */
-	struct wlr_box geom, pending, float_geom, animainit_geom,
+	struct wlr_box geom, pending, float_geom, canvas_geom[CANVAS_MAX_TAGS],
+		canvas_geom_backup[CANVAS_MAX_TAGS], animainit_geom,
 		overview_backup_geom, current,
 		drag_begin_geom; /* layout-relative, includes border */
 	Monitor *mon;
@@ -535,6 +538,10 @@ struct Monitor {
 	uint32_t visible_scroll_tiling_clients;
 	char last_surface_ws_name[256];
 	struct wlr_ext_workspace_group_handle_v1 *ext_group;
+	bool canvas_in_overview;
+	float canvas_saved_pan_x;
+	float canvas_saved_pan_y;
+	float canvas_saved_zoom;
 };
 
 typedef struct {
@@ -779,6 +786,7 @@ static struct wlr_scene_tree *
 wlr_scene_tree_snapshot(struct wlr_scene_node *node,
 						struct wlr_scene_tree *parent);
 static bool is_scroller_layout(Monitor *m);
+static bool is_canvas_layout(Monitor *m);
 static bool is_centertile_layout(Monitor *m);
 static void create_output(struct wlr_backend *backend, void *data);
 static void get_layout_abbr(char *abbr, const char *full_name);
@@ -957,6 +965,9 @@ struct Pertag {
 	int32_t open_as_floating[LENGTH(tags) + 1]; /* open_as_floating per tag */
 	const Layout
 		*ltidxs[LENGTH(tags) + 1]; /* matrix of tags and layouts indexes  */
+	float canvas_pan_x[LENGTH(tags) + 1];
+	float canvas_pan_y[LENGTH(tags) + 1];
+	float canvas_zoom[LENGTH(tags) + 1]; /* visual zoom factor, 1.0 = no zoom */
 };
 
 #include "config/parse_config.h"
@@ -1029,6 +1040,7 @@ static struct wl_event_source *sync_keymap;
 #include "ext-protocol/all.h"
 #include "fetch/fetch.h"
 #include "layout/arrange.h"
+#include "layout/canvas.h"
 #include "layout/horizontal.h"
 #include "layout/vertical.h"
 
@@ -1436,7 +1448,8 @@ void client_reset_mon_tags(Client *c, Monitor *mon, uint32_t newtags) {
 
 void check_match_tag_floating_rule(Client *c, Monitor *mon) {
 	if (c->tags && !c->isfloating && mon && !c->swallowedby &&
-		mon->pertag->open_as_floating[get_tags_first_tag_num(c->tags)]) {
+		(mon->pertag->open_as_floating[get_tags_first_tag_num(c->tags)] ||
+		 mon->pertag->ltidxs[mon->pertag->curtag]->id == CANVAS)) {
 		c->isfloating = 1;
 	}
 }
@@ -2091,6 +2104,23 @@ buttonpress(struct wl_listener *listener, void *data) {
 		if (locked)
 			break;
 
+		{
+			struct wlr_keyboard *kb = wlr_seat_get_keyboard(seat);
+			uint32_t pmods = kb ? wlr_keyboard_get_modifiers(kb) : 0;
+			struct wlr_keyboard *hkb = &kb_group->wlr_group->keyboard;
+			uint32_t hmods = hkb ? wlr_keyboard_get_modifiers(hkb) : 0;
+			pmods = pmods | hmods;
+			if (event->button == BTN_MIDDLE &&
+				(CLEANMASK(pmods) & WLR_MODIFIER_LOGO) && selmon &&
+				selmon->pertag->ltidxs[selmon->pertag->curtag]->id == CANVAS) {
+				grabcx = (int32_t)round(cursor->x);
+				grabcy = (int32_t)round(cursor->y);
+				cursor_mode = CurPan;
+				wlr_cursor_set_xcursor(cursor, cursor_mgr, "grabbing");
+				return;
+			}
+		}
+
 		xytonode(cursor->x, cursor->y, &surface, NULL, NULL, NULL, NULL);
 		if (toplevel_from_wlr_surface(surface, &c, &l) >= 0) {
 			if (c && c->scene->node.enabled &&
@@ -2131,6 +2161,11 @@ buttonpress(struct wl_listener *listener, void *data) {
 				return;
 			}
 
+			if (selmon->canvas_in_overview && event->button == BTN_LEFT) {
+				canvas_overview_toggle(&(Arg){0});
+				return;
+			}
+
 			if (selmon->isoverview && event->button == BTN_RIGHT && c) {
 				pending_kill_client(c);
 				return;
@@ -2146,6 +2181,12 @@ buttonpress(struct wl_listener *listener, void *data) {
 		}
 		break;
 	case WL_POINTER_BUTTON_STATE_RELEASED:
+		if (!locked && cursor_mode == CurPan) {
+			cursor_mode = CurNormal;
+			wlr_cursor_set_xcursor(cursor, cursor_mgr, "default");
+			motionnotify(0, NULL, 0, 0, 0, 0);
+			return;
+		}
 		/* If you released any buttons, we exit interactive move/resize mode. */
 		if (!locked && cursor_mode != CurNormal && cursor_mode != CurPressed) {
 			cursor_mode = CurNormal;
@@ -2159,8 +2200,14 @@ buttonpress(struct wl_listener *listener, void *data) {
 				selmon->sel = NULL;
 			}
 			selmon = xytomon(cursor->x, cursor->y);
-			client_update_oldmonname_record(grabc, selmon);
-			setmon(grabc, selmon, 0, true);
+			if (grabc->mon &&
+				grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id ==
+					CANVAS) {
+				selmon = grabc->mon;
+			} else {
+				client_update_oldmonname_record(grabc, selmon);
+				setmon(grabc, selmon, 0, true);
+			}
 			selmon->prevsel = ISTILED(selmon->sel) ? selmon->sel : NULL;
 			selmon->sel = grabc;
 			tmpc = grabc;
@@ -2567,6 +2614,20 @@ void commitnotify(struct wl_listener *listener, void *data) {
 		c->dirty = new_geo->width != c->geom.width - 2 * c->bw ||
 				   new_geo->height != c->geom.height - 2 * c->bw ||
 				   new_geo->x != 0 || new_geo->y != 0;
+	}
+
+	if (c->mon && is_canvas_layout(c->mon)) {
+		uint32_t tag = c->mon->pertag->curtag;
+		float zoom = c->mon->pertag->canvas_zoom[tag];
+		float effective_zoom = zoom;
+		if (c->mon->canvas_in_overview &&
+			c->canvas_geom_backup[tag].width > 0) {
+			effective_zoom *= (float)c->canvas_geom[tag].width /
+							  c->canvas_geom_backup[tag].width;
+		}
+		if (effective_zoom != 1.0f) {
+			apply_visual_zoom(c, effective_zoom);
+		}
 	}
 
 	if (c == grabc || !c->dirty)
@@ -3038,6 +3099,7 @@ void createmon(struct wl_listener *listener, void *data) {
 		m->pertag->nmasters[i] = config.default_nmaster;
 		m->pertag->mfacts[i] = config.default_mfact;
 		m->pertag->ltidxs[i] = &layouts[0];
+		m->pertag->canvas_zoom[i] = 1.0f;
 	}
 
 	// apply tag rule
@@ -3689,6 +3751,22 @@ keybinding(uint32_t state, bool locked, uint32_t mods, xkb_keysym_t sym,
 		return false;
 	}
 
+	if (state == WL_KEYBOARD_KEY_STATE_PRESSED && !locked &&
+		(CLEANMASK(mods) & WLR_MODIFIER_LOGO) && selmon &&
+		selmon->pertag->ltidxs[selmon->pertag->curtag]->id == CANVAS) {
+		xkb_keysym_t lower = xkb_keysym_to_lower(sym);
+		if (lower == XKB_KEY_z) {
+			canvas_zoom_resize(&(Arg){.f = 1.0f / 1.1f});
+			return 1;
+		} else if (lower == XKB_KEY_x) {
+			canvas_zoom_resize(&(Arg){.f = 1.1f});
+			return 1;
+		} else if (lower == XKB_KEY_o) {
+			canvas_overview_toggle(&(Arg){0});
+			return 1;
+		}
+	}
+
 	for (ji = 0; ji < config.key_bindings_count; ji++) {
 		if (config.key_bindings_count < 1)
 			break;
@@ -4037,6 +4115,10 @@ mapnotify(struct wl_listener *listener, void *data) {
 	if (client_is_x11(c))
 		init_client_properties(c);
 
+	if (c->mon && c->mon->canvas_in_overview) {
+		canvas_overview_toggle(&(Arg){0});
+	}
+
 	// set special window properties
 	if (client_is_unmanaged(c) || client_is_x11_popup(c)) {
 		c->bw = 0;
@@ -4261,6 +4343,19 @@ void resize_floating_window(Client *grabc) {
 		.height = grabc->geom.height + (rzcorner & 2 ? cdy : -cdy)};
 
 	grabc->float_geom = box;
+	if (grabc->mon &&
+		grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id == CANVAS) {
+		uint32_t tag = grabc->mon->pertag->curtag;
+		float zoom = grabc->mon->pertag->canvas_zoom[tag];
+		float pan_x = grabc->mon->pertag->canvas_pan_x[tag];
+		float pan_y = grabc->mon->pertag->canvas_pan_y[tag];
+		grabc->canvas_geom[tag].x =
+			(int32_t)roundf((box.x - grabc->mon->w.x) / zoom + pan_x);
+		grabc->canvas_geom[tag].y =
+			(int32_t)roundf((box.y - grabc->mon->w.y) / zoom + pan_y);
+		grabc->canvas_geom[tag].width = (int32_t)roundf(box.width / zoom);
+		grabc->canvas_geom[tag].height = (int32_t)roundf(box.height / zoom);
+	}
 
 	resize(grabc, box, 1);
 	grabcx += cdx;
@@ -4332,7 +4427,24 @@ void motionnotify(uint32_t time, struct wlr_input_device *device, double dx,
 
 	/* If we are currently grabbing the mouse, handle and return */
 	if (cursor_mode == CurMove) {
-		/* Move the grabbed client to the new position. */
+		if (grabc->mon &&
+			grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id ==
+				CANVAS) {
+			if (!time)
+				return;
+			int dx = (int32_t)round(cursor->x) - grabcx;
+			int dy = (int32_t)round(cursor->y) - grabcy;
+			grabcx = (int32_t)round(cursor->x);
+			grabcy = (int32_t)round(cursor->y);
+
+			uint32_t tag = grabc->mon->pertag->curtag;
+			float zoom = grabc->mon->pertag->canvas_zoom[tag];
+			grabc->canvas_geom[tag].x += (int32_t)roundf(dx / zoom);
+			grabc->canvas_geom[tag].y += (int32_t)roundf(dy / zoom);
+
+			arrange(grabc->mon, false, false);
+			return;
+		}
 		grabc->iscustomsize = 1;
 		grabc->float_geom =
 			(struct wlr_box){.x = (int32_t)round(cursor->x) - grabcx,
@@ -4342,7 +4454,10 @@ void motionnotify(uint32_t time, struct wlr_input_device *device, double dx,
 		resize(grabc, grabc->float_geom, 1);
 		return;
 	} else if (cursor_mode == CurResize) {
-		if (grabc->isfloating) {
+		if (grabc->isfloating ||
+			(grabc->mon &&
+			 grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id ==
+				 CANVAS)) {
 			grabc->iscustomsize = 1;
 			if (last_apply_drap_time == 0 ||
 				time - last_apply_drap_time >
@@ -4354,6 +4469,21 @@ void motionnotify(uint32_t time, struct wlr_input_device *device, double dx,
 		} else {
 			resize_tile_client(grabc, true, 0, 0, time);
 		}
+	} else if (cursor_mode == CurPan) {
+		if (!time)
+			return;
+		int dx = (int32_t)round(cursor->x) - grabcx;
+		int dy = (int32_t)round(cursor->y) - grabcy;
+		grabcx = (int32_t)round(cursor->x);
+		grabcy = (int32_t)round(cursor->y);
+
+		uint32_t tag = selmon->pertag->curtag;
+		float zoom = selmon->pertag->canvas_zoom[tag];
+		selmon->pertag->canvas_pan_x[tag] -= dx / zoom;
+		selmon->pertag->canvas_pan_y[tag] -= dy / zoom;
+
+		arrange(selmon, false, false);
+		return;
 	}
 
 	/* If there's no client surface under the cursor, set the cursor image
@@ -6195,7 +6325,7 @@ void updatemons(struct wl_listener *listener, void *data) {
 		wl_list_for_each(c, &clients, link) {
 			// floating window position auto adjust the change of monitor
 			// position
-			if (c->isfloating && c->mon == m) {
+			if (c->isfloating && c->mon == m && !is_canvas_layout(m)) {
 				c->geom.x += mon_pos_offsetx;
 				c->geom.y += mon_pos_offsety;
 				c->float_geom = c->geom;
@@ -6587,6 +6717,20 @@ void createnotifyx11(struct wl_listener *listener, void *data) {
 void commitx11(struct wl_listener *listener, void *data) {
 	Client *c = wl_container_of(listener, c, commmitx11);
 	struct wlr_surface_state *state = &c->surface.xwayland->surface->current;
+
+	if (c->mon && is_canvas_layout(c->mon)) {
+		uint32_t tag = c->mon->pertag->curtag;
+		float zoom = c->mon->pertag->canvas_zoom[tag];
+		float effective_zoom = zoom;
+		if (c->mon->canvas_in_overview &&
+			c->canvas_geom_backup[tag].width > 0) {
+			effective_zoom *= (float)c->canvas_geom[tag].width /
+							  c->canvas_geom_backup[tag].width;
+		}
+		if (effective_zoom != 1.0f) {
+			apply_visual_zoom(c, effective_zoom);
+		}
+	}
 
 	if ((int32_t)c->geom.width - 2 * (int32_t)c->bw == (int32_t)state->width &&
 		(int32_t)c->geom.height - 2 * (int32_t)c->bw ==

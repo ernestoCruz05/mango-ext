@@ -1182,6 +1182,11 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 		(*arg).i = parse_direction(arg_value);
 	} else if (strcmp(func_name, "toggle_all_floating") == 0) {
 		func = toggle_all_floating;
+	} else if (strcmp(func_name, "canvas_zoom_resize") == 0) {
+		func = canvas_zoom_resize;
+		(*arg).f = atof(arg_value);
+	} else if (strcmp(func_name, "canvas_overview_toggle") == 0) {
+		func = canvas_overview_toggle;
 	} else {
 		return NULL;
 	}

@@ -70,4 +70,6 @@ int32_t disable_monitor(const Arg *arg);
 int32_t enable_monitor(const Arg *arg);
 int32_t toggle_monitor(const Arg *arg);
 int32_t scroller_stack(const Arg *arg);
+int32_t canvas_zoom_resize(const Arg *arg);
+int32_t canvas_overview_toggle(const Arg *arg);
 int32_t toggle_all_floating(const Arg *arg);
