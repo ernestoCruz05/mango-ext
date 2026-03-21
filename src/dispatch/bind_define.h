@@ -142,6 +142,8 @@ int32_t focusdir(const Arg *arg) {
 		focusclient(c, 1);
 		if (config.warpcursor)
 			warp_cursor(c);
+		if (selmon && is_canvas_layout(selmon))
+			canvas_pan_to_client(selmon, c);
 	} else {
 		if (config.focus_cross_tag) {
 			if (arg->i == LEFT || arg->i == UP)
@@ -374,7 +376,10 @@ int32_t moveresize(const Arg *arg) {
 		return 0;
 	}
 	/* Float the window and tell motionnotify to grab it */
-	if (grabc->isfloating == 0 && arg->ui == CurMove) {
+	if (grabc->isfloating == 0 && arg->ui == CurMove &&
+		!(grabc->mon &&
+		  grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id ==
+			  CANVAS)) {
 		grabc->drag_to_tile = true;
 		exit_scroller_stack(grabc);
 		setfloating(grabc, 1);
@@ -385,34 +390,52 @@ int32_t moveresize(const Arg *arg) {
 
 	switch (cursor_mode = arg->ui) {
 	case CurMove:
-
-		grabcx = cursor->x - grabc->geom.x;
-		grabcy = cursor->y - grabc->geom.y;
+		if (grabc->mon &&
+			grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id ==
+				CANVAS) {
+			grabcx = (int32_t)round(cursor->x);
+			grabcy = (int32_t)round(cursor->y);
+		} else {
+			grabcx = cursor->x - grabc->geom.x;
+			grabcy = cursor->y - grabc->geom.y;
+		}
 		wlr_cursor_set_xcursor(cursor, cursor_mgr, "grab");
 		break;
 	case CurResize:
 		/* Doesn't work for X11 output - the next absolute motion event
 		 * returns the cursor to where it started */
-		if (grabc->isfloating) {
+		if (grabc->isfloating ||
+			(grabc->mon &&
+			 grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id ==
+				 CANVAS)) {
 			rzcorner = config.drag_corner;
 			grabcx = (int)round(cursor->x);
 			grabcy = (int)round(cursor->y);
+
+			int32_t vis_w = grabc->geom.width;
+			int32_t vis_h = grabc->geom.height;
+			if (grabc->mon &&
+				grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id ==
+					CANVAS) {
+				uint32_t _tag = grabc->mon->pertag->curtag;
+				float _zoom = grabc->mon->pertag->canvas_zoom[_tag];
+				vis_w = (int32_t)roundf(vis_w * _zoom);
+				vis_h = (int32_t)roundf(vis_h * _zoom);
+			}
+
 			if (rzcorner == 4)
 				/* identify the closest corner index */
-				rzcorner = (grabcx - grabc->geom.x <
-									grabc->geom.x + grabc->geom.width - grabcx
-								? 0
-								: 1) +
-						   (grabcy - grabc->geom.y <
-									grabc->geom.y + grabc->geom.height - grabcy
-								? 0
-								: 2);
+				rzcorner =
+					(grabcx - grabc->geom.x < grabc->geom.x + vis_w - grabcx
+						 ? 0
+						 : 1) +
+					(grabcy - grabc->geom.y < grabc->geom.y + vis_h - grabcy
+						 ? 0
+						 : 2);
 
 			if (config.drag_warp_cursor) {
-				grabcx = rzcorner & 1 ? grabc->geom.x + grabc->geom.width
-									  : grabc->geom.x;
-				grabcy = rzcorner & 2 ? grabc->geom.y + grabc->geom.height
-									  : grabc->geom.y;
+				grabcx = rzcorner & 1 ? grabc->geom.x + vis_w : grabc->geom.x;
+				grabcy = rzcorner & 2 ? grabc->geom.y + vis_h : grabc->geom.y;
 				wlr_cursor_warp_closest(cursor, NULL, grabcx, grabcy);
 			}
 
@@ -1013,7 +1036,6 @@ int32_t switch_layout(const Arg *arg) {
 			len = MAX(strlen(layouts[ji].name), strlen(target_layout_name));
 			if (strncmp(layouts[ji].name, target_layout_name, len) == 0) {
 				selmon->pertag->ltidxs[selmon->pertag->curtag] = &layouts[ji];
-
 				break;
 			}
 		}
@@ -1667,6 +1689,10 @@ int32_t toggleoverview(const Arg *arg) {
 	if (!selmon)
 		return 0;
 
+	Client *fs_ov = focustop(selmon);
+	if (fs_ov && fs_ov->isfullscreen)
+		return 0;
+
 	if (selmon->isoverview && config.ov_tab_mode && arg->i != 1 &&
 		selmon->sel) {
 		focusstack(&(Arg){.i = 1});
@@ -1866,6 +1892,86 @@ int32_t scroller_stack(const Arg *arg) {
 	if (stack_head->isfullscreen) {
 		setfullscreen(stack_head, 0);
 	}
+
+	arrange(selmon, false, false);
+	return 0;
+}
+
+int32_t canvas_zoom_resize(const Arg *arg) {
+	if (!selmon || !is_canvas_layout(selmon))
+		return 0;
+
+	Client *fs = focustop(selmon);
+	if (fs && fs->isfullscreen)
+		return 0;
+
+	float factor = arg->f;
+	if (factor <= 0.0f)
+		return 0;
+
+	uint32_t tag = selmon->pertag->curtag;
+	float old_zoom = selmon->pertag->canvas_zoom[tag];
+	selmon->pertag->canvas_zoom[tag] *= factor;
+	selmon->pertag->canvas_zoom[tag] =
+		CLAMP_FLOAT(selmon->pertag->canvas_zoom[tag], 0.1f, 1.0f);
+	float new_zoom = selmon->pertag->canvas_zoom[tag];
+
+	// Adjust pan so zoom centers on the screen center
+	float center_canvas_x =
+		selmon->pertag->canvas_pan_x[tag] + (selmon->w.width / old_zoom) / 2.0f;
+	float center_canvas_y = selmon->pertag->canvas_pan_y[tag] +
+							(selmon->w.height / old_zoom) / 2.0f;
+	selmon->pertag->canvas_pan_x[tag] =
+		center_canvas_x - (selmon->w.width / new_zoom) / 2.0f;
+	selmon->pertag->canvas_pan_y[tag] =
+		center_canvas_y - (selmon->w.height / new_zoom) / 2.0f;
+
+	canvas_reposition(selmon);
+	return 0;
+}
+
+int32_t canvas_overview_toggle(const Arg *arg) {
+	if (!selmon || !is_canvas_layout(selmon))
+		return 0;
+
+	if (selmon->canvas_overview_visible && !selmon->canvas_overview_closing) {
+		selmon->canvas_overview_closing = true;
+		selmon->canvas_overview_anim_start = get_now_in_ms();
+	} else if (!selmon->canvas_overview_visible) {
+		if (selmon->minimap_visible) {
+			selmon->minimap_visible = false;
+			if (minimap_scene_tree) {
+				wlr_scene_node_destroy(&minimap_scene_tree->node);
+				minimap_scene_tree = NULL;
+			}
+		}
+		selmon->canvas_overview_visible = true;
+		selmon->canvas_overview_closing = false;
+		selmon->canvas_overview_progress = 0.0f;
+		selmon->canvas_overview_anim_start = get_now_in_ms();
+	}
+	request_fresh_all_monitors();
+	return 0;
+}
+
+int32_t canvas_fill_viewport(const Arg *arg) {
+	if (!selmon || !is_canvas_layout(selmon))
+		return 0;
+
+	Client *c = selmon->sel;
+	if (!c || c->isfullscreen || c->ismaximizescreen)
+		return 0;
+
+	uint32_t tag = selmon->pertag->curtag;
+	float zoom = selmon->pertag->canvas_zoom[tag];
+	float pan_x = selmon->pertag->canvas_pan_x[tag];
+	float pan_y = selmon->pertag->canvas_pan_y[tag];
+
+	c->canvas_geom[tag].x = (int32_t)roundf(pan_x);
+	c->canvas_geom[tag].y = (int32_t)roundf(pan_y);
+	c->canvas_geom[tag].width = (int32_t)roundf(selmon->w.width / zoom);
+	c->canvas_geom[tag].height = (int32_t)roundf(selmon->w.height / zoom);
+	c->iscustomsize = 1;
 
 	arrange(selmon, false, false);
 	return 0;
