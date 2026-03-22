@@ -1030,6 +1030,8 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 		func = togglefakefullscreen;
 	} else if (strcmp(func_name, "toggleoverlay") == 0) {
 		func = toggleoverlay;
+	} else if (strcmp(func_name, "toggleminimap") == 0) {
+		func = toggleminimap;
 	} else if (strcmp(func_name, "minimized") == 0) {
 		func = minimized;
 	} else if (strcmp(func_name, "restore_minimized") == 0) {

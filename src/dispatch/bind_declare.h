@@ -56,6 +56,7 @@ int32_t incohgaps(const Arg *arg);
 int32_t incovgaps(const Arg *arg);
 int32_t defaultgaps(const Arg *arg);
 int32_t togglefakefullscreen(const Arg *arg);
+int32_t toggleminimap(const Arg *arg);
 int32_t toggleoverlay(const Arg *arg);
 int32_t movewin(const Arg *arg);
 int32_t resizewin(const Arg *arg);

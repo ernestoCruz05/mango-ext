@@ -19,6 +19,54 @@ static void canvas_geom_init(Client *c, Monitor *m, uint32_t tag, float pan_x,
 	c->canvas_geom[tag].height = h;
 }
 
+static void canvas_reposition(Monitor *m) {
+	Client *c;
+	uint32_t tag = m->pertag->curtag;
+
+	float pan_x = m->pertag->canvas_pan_x[tag];
+	float pan_y = m->pertag->canvas_pan_y[tag];
+	float zoom = m->pertag->canvas_zoom[tag];
+
+	wl_list_for_each(c, &clients, link) {
+		if (!VISIBLEON(c, m) || c->isunglobal)
+			continue;
+		if (c->isfullscreen || c->ismaximizescreen)
+			continue;
+		if (c->canvas_geom[tag].width <= 0 || c->canvas_geom[tag].height <= 0)
+			continue;
+
+		int new_x =
+			m->w.x + (int32_t)roundf((c->canvas_geom[tag].x - pan_x) * zoom);
+		int new_y =
+			m->w.y + (int32_t)roundf((c->canvas_geom[tag].y - pan_y) * zoom);
+
+		if (c->animation.running) {
+			c->animation.running = false;
+			c->need_output_flush = false;
+		}
+
+		c->geom.x = new_x;
+		c->geom.y = new_y;
+		c->pending.x = new_x;
+		c->pending.y = new_y;
+		c->current.x = new_x;
+		c->current.y = new_y;
+		c->animation.current.x = new_x;
+		c->animation.current.y = new_y;
+		c->animation.initial.x = new_x;
+		c->animation.initial.y = new_y;
+		c->animainit_geom.x = new_x;
+		c->animainit_geom.y = new_y;
+
+		wlr_scene_node_set_position(&c->scene->node, new_x, new_y);
+
+		client_apply_clip(c, 1.0);
+
+		if (zoom != 1.0f)
+			apply_visual_zoom(c, zoom);
+	}
+}
+
 static void canvas(Monitor *m) {
 	Client *c;
 	uint32_t tag = m->pertag->curtag;
@@ -31,6 +79,9 @@ static void canvas(Monitor *m) {
 
 	wl_list_for_each(c, &clients, link) {
 		if (!VISIBLEON(c, m) || c->isunglobal)
+			continue;
+
+		if (c->isfullscreen || c->ismaximizescreen)
 			continue;
 
 		if (c->canvas_geom[tag].width == 0 && c->canvas_geom[tag].height == 0)
