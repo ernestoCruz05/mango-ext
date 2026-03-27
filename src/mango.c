@@ -1138,6 +1138,24 @@ void show_scratchpad(Client *c) {
 		resize(c, c->geom, 0);
 	}
 
+	if (c->mon && is_canvas_layout(c->mon)) {
+		uint32_t tag = c->mon->pertag->curtag;
+		float pan_x = c->mon->pertag->canvas_pan_x[tag];
+		float pan_y = c->mon->pertag->canvas_pan_y[tag];
+		float zoom = c->mon->pertag->canvas_zoom[tag];
+		int w = c->canvas_geom[tag].width > 0 ? c->canvas_geom[tag].width
+											  : c->geom.width;
+		int h = c->canvas_geom[tag].height > 0 ? c->canvas_geom[tag].height
+											   : c->geom.height;
+
+		float cx = pan_x + (c->mon->w.width / 2.0f) / zoom;
+		float cy = pan_y + (c->mon->w.height / 2.0f) / zoom;
+		c->canvas_geom[tag].x = (int32_t)(cx - w / 2.0f);
+		c->canvas_geom[tag].y = (int32_t)(cy - h / 2.0f);
+		c->canvas_geom[tag].width = w;
+		c->canvas_geom[tag].height = h;
+	}
+
 	c->oldtags = c->mon->tagset[c->mon->seltags];
 	wl_list_remove(&c->link);					  // 从原来位置移除
 	wl_list_insert(clients.prev->next, &c->link); // 插入开头
@@ -1215,6 +1233,24 @@ bool switch_scratchpad_client_state(Client *c) {
 
 		c->float_geom =
 			setclient_coordinate_center(c, c->mon, c->float_geom, 0, 0);
+
+		if (is_canvas_layout(c->mon)) {
+			uint32_t ctag = c->mon->pertag->curtag;
+			float cpan_x = c->mon->pertag->canvas_pan_x[ctag];
+			float cpan_y = c->mon->pertag->canvas_pan_y[ctag];
+			float czoom = c->mon->pertag->canvas_zoom[ctag];
+			int cw = c->canvas_geom[ctag].width > 0 ? c->canvas_geom[ctag].width
+													: c->float_geom.width;
+			int ch = c->canvas_geom[ctag].height > 0
+						 ? c->canvas_geom[ctag].height
+						 : c->float_geom.height;
+			float ccx = cpan_x + (c->mon->w.width / 2.0f) / czoom;
+			float ccy = cpan_y + (c->mon->w.height / 2.0f) / czoom;
+			c->canvas_geom[ctag].x = (int32_t)(ccx - cw / 2.0f);
+			c->canvas_geom[ctag].y = (int32_t)(ccy - ch / 2.0f);
+			c->canvas_geom[ctag].width = cw;
+			c->canvas_geom[ctag].height = ch;
+		}
 
 		// 只有显示状态的scratchpad才需要聚焦和返回true
 		if (c->is_scratchpad_show) {
