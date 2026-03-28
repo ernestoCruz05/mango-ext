@@ -344,8 +344,9 @@ struct ivec2 clip_to_hide(Client *c, struct wlr_box *clip_box) {
 	int32_t offsetx = 0, offsety = 0, offsetw = 0, offseth = 0;
 	struct ivec2 offset = {0, 0, 0, 0};
 
+	bool is_canvas = c->mon && is_canvas_layout(c->mon);
 	if (!ISSCROLLTILED(c) && !c->animation.tagining && !c->animation.tagouted &&
-		!c->animation.tagouting)
+		!c->animation.tagouting && !is_canvas)
 		return offset;
 
 	int32_t bottom_out_offset =
@@ -366,7 +367,7 @@ struct ivec2 clip_to_hide(Client *c, struct wlr_box *clip_box) {
 	  要等窗口表面超出才开始计算偏差
 	*/
 	if (ISSCROLLTILED(c) || c->animation.tagining || c->animation.tagouted ||
-		c->animation.tagouting) {
+		c->animation.tagouting || is_canvas) {
 		if (left_out_offset > 0) {
 			offsetx = GEZERO(left_out_offset - bw);
 			clip_box->x = clip_box->x + offsetx;
@@ -393,7 +394,8 @@ struct ivec2 clip_to_hide(Client *c, struct wlr_box *clip_box) {
 	offset.height = offseth;
 
 	if ((clip_box->width + bw <= 0 || clip_box->height + bw <= 0) &&
-		(ISSCROLLTILED(c) || c->animation.tagouting || c->animation.tagining)) {
+		(ISSCROLLTILED(c) || c->animation.tagouting || c->animation.tagining ||
+		 is_canvas)) {
 		c->is_clip_to_hide = true;
 		wlr_scene_node_set_enabled(&c->scene->node, false);
 	} else if (c->is_clip_to_hide && VISIBLEON(c, c->mon)) {
