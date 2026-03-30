@@ -314,6 +314,8 @@ typedef struct {
 	uint32_t gappoh;
 	uint32_t gappov;
 	uint32_t borderpx;
+	int32_t canvas_tiling;
+	int32_t canvas_tiling_gap;
 	float scratchpad_width_ratio;
 	float scratchpad_height_ratio;
 	float rootcolor[4];
@@ -1713,6 +1715,10 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->scratchpad_height_ratio = atof(value);
 	} else if (strcmp(key, "borderpx") == 0) {
 		config->borderpx = atoi(value);
+	} else if (strcmp(key, "canvas_tiling") == 0) {
+		config->canvas_tiling = atoi(value);
+	} else if (strcmp(key, "canvas_tiling_gap") == 0) {
+		config->canvas_tiling_gap = atoi(value);
 	} else if (strcmp(key, "rootcolor") == 0) {
 		int64_t color = parse_color(value);
 		if (color == -1) {
@@ -3352,6 +3358,8 @@ void set_value_default() {
 	config.idleinhibit_ignore_visible = 0;
 
 	config.borderpx = 4;
+	config.canvas_tiling = 0;
+	config.canvas_tiling_gap = 10;
 	config.overviewgappi = 5;
 	config.overviewgappo = 30;
 	config.cursor_hide_timeout = 0;
