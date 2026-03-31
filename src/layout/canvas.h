@@ -55,7 +55,8 @@ static void canvas_geom_init(Client *c, Monitor *m, uint32_t tag, float pan_x,
 
 	int tiling = config.canvas_tiling;
 
-	if (tiling > 0 && !client_is_float_type(c) && !client_get_parent(c)) {
+	if (tiling > 0 && !client_is_float_type(c) && !client_get_parent(c) &&
+		!c->is_in_scratchpad && !c->isnamedscratchpad && !c->canvas_notile) {
 		Client *focused = NULL, *tmp;
 		wl_list_for_each(tmp, &fstack, flink) {
 			if (tmp == c || tmp->iskilling || tmp->isunglobal)

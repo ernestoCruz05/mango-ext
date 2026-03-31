@@ -95,6 +95,7 @@ typedef struct {
 	int32_t force_tearing;
 	int32_t noswallow;
 	int32_t noblur;
+	int32_t canvas_notile;
 	float focused_opacity;
 	float unfocused_opacity;
 	float scroller_proportion_single;
@@ -316,6 +317,7 @@ typedef struct {
 	uint32_t borderpx;
 	int32_t canvas_tiling;
 	int32_t canvas_tiling_gap;
+	int32_t canvas_pan_on_kill;
 	float scratchpad_width_ratio;
 	float scratchpad_height_ratio;
 	float rootcolor[4];
@@ -1719,6 +1721,8 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->canvas_tiling = atoi(value);
 	} else if (strcmp(key, "canvas_tiling_gap") == 0) {
 		config->canvas_tiling_gap = atoi(value);
+	} else if (strcmp(key, "canvas_pan_on_kill") == 0) {
+		config->canvas_pan_on_kill = atoi(value);
 	} else if (strcmp(key, "rootcolor") == 0) {
 		int64_t color = parse_color(value);
 		if (color == -1) {
@@ -2091,6 +2095,7 @@ bool parse_option(Config *config, char *key, char *value) {
 		rule->force_tearing = -1;
 		rule->noswallow = -1;
 		rule->noblur = -1;
+		rule->canvas_notile = -1;
 		rule->nofocus = -1;
 		rule->nofadein = -1;
 		rule->nofadeout = -1;
@@ -2210,6 +2215,8 @@ bool parse_option(Config *config, char *key, char *value) {
 					rule->noswallow = atoi(val);
 				} else if (strcmp(key, "noblur") == 0) {
 					rule->noblur = atoi(val);
+				} else if (strcmp(key, "canvas_notile") == 0) {
+					rule->canvas_notile = atoi(val);
 				} else if (strcmp(key, "scroller_proportion") == 0) {
 					rule->scroller_proportion = atof(val);
 				} else if (strcmp(key, "isfullscreen") == 0) {
@@ -3360,6 +3367,7 @@ void set_value_default() {
 	config.borderpx = 4;
 	config.canvas_tiling = 0;
 	config.canvas_tiling_gap = 10;
+	config.canvas_pan_on_kill = 1;
 	config.overviewgappi = 5;
 	config.overviewgappo = 30;
 	config.cursor_hide_timeout = 0;

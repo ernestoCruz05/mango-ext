@@ -412,6 +412,7 @@ struct Client {
 	float unfocused_opacity;
 	char oldmonname[128];
 	int32_t noblur;
+	int32_t canvas_notile;
 	double master_mfact_per, master_inner_per, stack_inner_per;
 	double old_master_mfact_per, old_master_inner_per, old_stack_inner_per;
 	double old_scroller_pproportion;
@@ -1443,6 +1444,7 @@ static void apply_rule_properties(Client *c, const ConfigWinRule *r) {
 	APPLY_INT_PROP(c, r, indleinhibit_when_focus);
 	APPLY_INT_PROP(c, r, isunglobal);
 	APPLY_INT_PROP(c, r, noblur);
+	APPLY_INT_PROP(c, r, canvas_notile);
 	APPLY_INT_PROP(c, r, allow_shortcuts_inhibit);
 
 	APPLY_FLOAT_PROP(c, r, scroller_proportion);
@@ -4273,6 +4275,7 @@ void init_client_properties(Client *c) {
 	c->noswallow = 0;
 	c->isterm = 0;
 	c->noblur = 0;
+	c->canvas_notile = 0;
 	c->tearing_hint = 0;
 	c->overview_isfullscreenbak = 0;
 	c->overview_ismaximizescreenbak = 0;
@@ -6965,7 +6968,7 @@ void unmapnotify(struct wl_listener *listener, void *data) {
 
 		if (nextfocus) {
 			focusclient(nextfocus, 0);
-			if (selmon && is_canvas_layout(selmon))
+			if (config.canvas_pan_on_kill && selmon && is_canvas_layout(selmon))
 				canvas_pan_to_client(selmon, nextfocus);
 		}
 
