@@ -962,6 +962,8 @@ static struct {
 #include "client/client.h"
 #include "config/preset.h"
 
+typedef struct DwindleNode DwindleNode;
+
 struct Pertag {
 	uint32_t curtag, prevtag;			/* current and previous tag */
 	int32_t nmasters[LENGTH(tags) + 1]; /* number of windows in master area */
@@ -974,6 +976,7 @@ struct Pertag {
 	float canvas_pan_x[LENGTH(tags) + 1];
 	float canvas_pan_y[LENGTH(tags) + 1];
 	float canvas_zoom[LENGTH(tags) + 1]; /* visual zoom factor, 1.0 = no zoom */
+	struct DwindleNode *dwindle_root[LENGTH(tags) + 1];
 };
 
 #include "config/parse_config.h"
@@ -1047,6 +1050,7 @@ static void canvas_pan_to_client(Monitor *m, Client *c);
 #include "fetch/fetch.h"
 #include "layout/arrange.h"
 #include "layout/canvas.h"
+#include "layout/dwindle.h"
 #include "layout/horizontal.h"
 #include "layout/vertical.h"
 
@@ -2160,14 +2164,21 @@ void place_drag_tile_client(Client *c) {
 			}
 		}
 	}
-	if (closest_client && closest_client->link.prev != &c->link) {
-		wl_list_remove(&c->link);
-		c->link.next = &closest_client->link;
-		c->link.prev = closest_client->link.prev;
-		closest_client->link.prev->next = &c->link;
-		closest_client->link.prev = &c->link;
-	} else if (closest_client) {
-		exchange_two_client(c, closest_client);
+	if (closest_client) {
+		if (c->mon &&
+			c->mon->pertag->ltidxs[c->mon->pertag->curtag]->id == DWINDLE) {
+			uint32_t tag = c->mon->pertag->curtag;
+			dwindle_insert(&c->mon->pertag->dwindle_root[tag], c,
+						   closest_client, c->mon->pertag->mfacts[tag]);
+		} else if (closest_client->link.prev != &c->link) {
+			wl_list_remove(&c->link);
+			c->link.next = &closest_client->link;
+			c->link.prev = closest_client->link.prev;
+			closest_client->link.prev->next = &c->link;
+			closest_client->link.prev = &c->link;
+		} else {
+			exchange_two_client(c, closest_client);
+		}
 	}
 	setfloating(c, 0);
 }
@@ -4760,6 +4771,15 @@ void motionnotify(uint32_t time, struct wlr_input_device *device, double dx,
 				last_apply_drap_time = time;
 			}
 			return;
+		} else if (grabc->mon &&
+				   grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id ==
+					   DWINDLE) {
+			int32_t dx = (int32_t)round(cursor->x) - grabcx;
+			int32_t dy = (int32_t)round(cursor->y) - grabcy;
+			grabcx = (int32_t)round(cursor->x);
+			grabcy = (int32_t)round(cursor->y);
+			if (dx || dy)
+				dwindle_resize_client(grabc->mon, grabc, dx, dy);
 		} else {
 			resize_tile_client(grabc, true, 0, 0, time);
 		}
@@ -5771,10 +5791,20 @@ void exchange_two_client(Client *c1, Client *c2) {
 		tmp_tags = c2->tags;
 		setmon(c2, c1->mon, c1->tags, false);
 		setmon(c1, tmp_mon, tmp_tags, false);
+		if (c1->mon &&
+			c1->mon->pertag->ltidxs[c1->mon->pertag->curtag]->id == DWINDLE)
+			dwindle_swap_clients(
+				&c1->mon->pertag->dwindle_root[c1->mon->pertag->curtag], c1,
+				c2);
 		arrange(c1->mon, false, false);
 		arrange(c2->mon, false, false);
 		focusclient(c1, 0);
 	} else {
+		if (c1->mon &&
+			c1->mon->pertag->ltidxs[c1->mon->pertag->curtag]->id == DWINDLE)
+			dwindle_swap_clients(
+				&c1->mon->pertag->dwindle_root[c1->mon->pertag->curtag], c1,
+				c2);
 		arrange(c1->mon, false, false);
 	}
 
@@ -7017,6 +7047,7 @@ void unmapnotify(struct wl_listener *listener, void *data) {
 	c->next_in_stack = NULL;
 	c->prev_in_stack = NULL;
 
+	dwindle_remove_client(c);
 	wlr_scene_node_destroy(&c->scene->node);
 	printstatus();
 	motionnotify(0, NULL, 0, 0, 0, 0);
