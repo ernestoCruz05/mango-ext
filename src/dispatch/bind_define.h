@@ -434,6 +434,20 @@ int32_t moveresize(const Arg *arg) {
 		} else {
 			grabcx = (int32_t)round(cursor->x);
 			grabcy = (int32_t)round(cursor->y);
+			if (grabc->mon &&
+				grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id ==
+					DWINDLE) {
+				int32_t bx = -1, by = -1;
+				if (dwindle_get_resize_border(grabc->mon, grabc, &bx, &by)) {
+					if (bx >= 0)
+						grabcx = bx;
+					if (by >= 0)
+						grabcy = by;
+					wlr_cursor_warp_closest(cursor, NULL, grabcx, grabcy);
+				}
+				drag_begin_cursorx = grabcx;
+				drag_begin_cursory = grabcy;
+			}
 			wlr_cursor_set_xcursor(cursor, cursor_mgr, "grab");
 		}
 		break;
