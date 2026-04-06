@@ -491,6 +491,7 @@ typedef struct {
 	struct wl_list link;
 	int32_t touch_id;
 	double start_x, start_y, end_x, end_y, start_surface_x, start_surface_y;
+	double prev_x, prev_y;
 	bool consumed_by_gesture;
 } TouchPoint;
 
@@ -6921,6 +6922,8 @@ void touchdown(struct wl_listener *listener, void *data) {
 	t->touch_id = event->touch_id;
 	t->start_x = lx;
 	t->start_y = ly;
+	t->prev_x = lx;
+	t->prev_y = ly;
 	gesture_touch_down(tg, t, lx, ly);
 	wl_list_insert(&tg->touch_points, &t->link);
 
@@ -7037,6 +7040,54 @@ void touchmotion(struct wl_listener *listener, void *data) {
 										 event->y, &lx, &ly);
 
 	gesture_touch_motion(tg, t, lx, ly);
+
+	int32_t nfingers = wl_list_length(&tg->touch_points);
+	if (selmon && is_canvas_layout(selmon) &&
+		!(focustop(selmon) && focustop(selmon)->isfullscreen)) {
+		uint32_t tag = selmon->pertag->curtag;
+		float zoom = selmon->pertag->canvas_zoom[tag];
+
+		if (nfingers == 3) {
+			double pdx = lx - t->prev_x;
+			double pdy = ly - t->prev_y;
+			selmon->pertag->canvas_pan_x[tag] -= pdx / zoom;
+			selmon->pertag->canvas_pan_y[tag] -= pdy / zoom;
+			canvas_reposition(selmon);
+		} else if (nfingers == 2) {
+			TouchPoint *other = NULL;
+			TouchPoint *tp_iter;
+			wl_list_for_each(tp_iter, &tg->touch_points, link) {
+				if (tp_iter->touch_id != t->touch_id) {
+					other = tp_iter;
+					break;
+				}
+			}
+			if (other) {
+				double prev_dist = sqrt(pow(t->prev_x - other->prev_x, 2) +
+										pow(t->prev_y - other->prev_y, 2));
+				double new_dist =
+					sqrt(pow(lx - other->end_x, 2) + pow(ly - other->end_y, 2));
+				if (prev_dist > 1.0) {
+					float factor = (float)(new_dist / prev_dist);
+					float old_zoom = zoom;
+					selmon->pertag->canvas_zoom[tag] =
+						CLAMP_FLOAT(zoom * factor, 0.1f, 1.0f);
+					float new_zoom = selmon->pertag->canvas_zoom[tag];
+					float cx = selmon->pertag->canvas_pan_x[tag] +
+							   (selmon->w.width / old_zoom) / 2.0f;
+					float cy = selmon->pertag->canvas_pan_y[tag] +
+							   (selmon->w.height / old_zoom) / 2.0f;
+					selmon->pertag->canvas_pan_x[tag] =
+						cx - (selmon->w.width / new_zoom) / 2.0f;
+					selmon->pertag->canvas_pan_y[tag] =
+						cy - (selmon->w.height / new_zoom) / 2.0f;
+					canvas_reposition(selmon);
+				}
+			}
+		}
+	}
+	t->prev_x = lx;
+	t->prev_y = ly;
 
 	if (emulating_pointer_from_touch) {
 		if (emulated_pointer_touch_id == event->touch_id) {
