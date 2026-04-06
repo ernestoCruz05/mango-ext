@@ -1,3 +1,5 @@
+#include <assert.h>
+
 void save_old_size_per(Monitor *m) {
 	Client *c = NULL;
 
