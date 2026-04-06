@@ -1957,6 +1957,24 @@ int32_t canvas_zoom_resize(const Arg *arg) {
 	return 0;
 }
 
+int32_t canvas_pan(const Arg *arg) {
+	if (!selmon || !is_canvas_layout(selmon))
+		return 0;
+
+	Client *fs = focustop(selmon);
+	if (fs && fs->isfullscreen)
+		return 0;
+
+	uint32_t tag = selmon->pertag->curtag;
+	float zoom = selmon->pertag->canvas_zoom[tag];
+
+	selmon->pertag->canvas_pan_x[tag] -= arg->f / zoom;
+	selmon->pertag->canvas_pan_y[tag] -= arg->f2 / zoom;
+
+	canvas_reposition(selmon);
+	return 0;
+}
+
 int32_t canvas_overview_toggle(const Arg *arg) {
 	if (!selmon || !is_canvas_layout(selmon))
 		return 0;
