@@ -5,7 +5,10 @@ void set_tagin_animation(Monitor *m, Client *c) {
 		return;
 	}
 
-	if (m->pertag->curtag > m->pertag->prevtag) {
+	bool going_forward = m->carousel_anim_dir ? m->carousel_anim_dir > 0
+											  : m->pertag->curtag > m->pertag->prevtag;
+
+	if (going_forward) {
 
 		c->animainit_geom.x = config.tag_animation_direction == VERTICAL
 								  ? c->animation.current.x
@@ -55,7 +58,9 @@ void set_arrange_visible(Monitor *m, Client *c, bool want_animation) {
 }
 
 void set_tagout_animation(Monitor *m, Client *c) {
-	if (m->pertag->curtag > m->pertag->prevtag) {
+	bool going_forward = m->carousel_anim_dir ? m->carousel_anim_dir > 0
+											  : m->pertag->curtag > m->pertag->prevtag;
+	if (going_forward) {
 		c->pending = c->geom;
 		c->pending.x =
 			config.tag_animation_direction == VERTICAL

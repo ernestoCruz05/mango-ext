@@ -326,6 +326,7 @@ typedef struct {
 	int32_t canvas_tiling;
 	int32_t canvas_tiling_gap;
 	int32_t canvas_pan_on_kill;
+	int32_t tag_carousel;
 	float scratchpad_width_ratio;
 	float scratchpad_height_ratio;
 	float rootcolor[4];
@@ -1842,6 +1843,8 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->canvas_tiling_gap = atoi(value);
 	} else if (strcmp(key, "canvas_pan_on_kill") == 0) {
 		config->canvas_pan_on_kill = atoi(value);
+	} else if (strcmp(key, "tag_carousel") == 0) {
+		config->tag_carousel = atoi(value);
 	} else if (strcmp(key, "rootcolor") == 0) {
 		int64_t color = parse_color(value);
 		if (color == -1) {
@@ -3617,6 +3620,7 @@ void set_value_default() {
 	config.canvas_tiling = 0;
 	config.canvas_tiling_gap = 10;
 	config.canvas_pan_on_kill = 1;
+	config.tag_carousel = 0;
 	config.overviewgappi = 5;
 	config.overviewgappo = 30;
 	config.cursor_hide_timeout = 0;

@@ -604,6 +604,7 @@ struct Monitor {
 	float canvas_saved_pan_x;
 	float canvas_saved_pan_y;
 	float canvas_saved_zoom;
+	int8_t carousel_anim_dir;
 };
 
 typedef struct {
