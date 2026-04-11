@@ -147,7 +147,7 @@ cd scenefx
 meson build -Dprefix=/usr
 sudo ninja -C build install
 
-git clone https://github.com/mangowm/mango.git
+git clone https://github.com/ernestoCruz05/mango-ext.git
 cd mangowm
 meson build -Dprefix=/usr
 sudo ninja -C build install
