@@ -4585,8 +4585,7 @@ mapnotify(struct wl_listener *listener, void *data) {
 	c->is_pending_open_animation = true;
 	wlr_log(WLR_ERROR, "[canvas_debug] mapnotify: before resize client=%p is_canvas=%d", c,
 			c->mon ? is_canvas_layout(c->mon) : -1);
-	if (!c->mon || !is_canvas_layout(c->mon))
-		resize(c, c->geom, 0);
+	resize(c, c->geom, 0);
 	wlr_log(WLR_ERROR, "[canvas_debug] mapnotify: after resize client=%p", c);
 	printstatus();
 	wlr_log(WLR_ERROR, "[canvas_debug] mapnotify done: client=%p", c);

@@ -214,8 +214,6 @@ static void canvas_reposition(Monitor *m) {
 							c->geom.height - 2 * c->bw);
 #endif
 
-		wlr_log(WLR_ERROR, "[canvas_debug] canvas_reposition: before set_clip client=%p", c);
-		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, NULL);
 		wlr_log(WLR_ERROR, "[canvas_debug] canvas_reposition: before apply_clip client=%p", c);
 		client_apply_clip(c, 1.0);
 		wlr_log(WLR_ERROR, "[canvas_debug] canvas_reposition: after apply_clip client=%p", c);
@@ -287,7 +285,7 @@ static void canvas(Monitor *m) {
 
 		if (effective_zoom == 1.0f) {
 			wlr_log(WLR_ERROR, "[canvas_debug] canvas: before clear_visual_zoom client=%p", c);
-			// clear_visual_zoom(c);
+			clear_visual_zoom(c);
 			wlr_log(WLR_ERROR, "[canvas_debug] canvas: after clear_visual_zoom client=%p", c);
 		} else {
 			wlr_log(WLR_ERROR, "[canvas_debug] canvas: before apply_visual_zoom client=%p zoom=%.3f", c, effective_zoom);
