@@ -399,9 +399,15 @@ int32_t moveresize(const Arg *arg) {
 
 	switch (cursor_mode = arg->ui) {
 	case CurMove:
-
-		grabcx = cursor->x - grabc->geom.x;
-		grabcy = cursor->y - grabc->geom.y;
+		if (grabc->mon &&
+			grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id ==
+				CANVAS) {
+			grabcx = (int32_t)round(cursor->x);
+			grabcy = (int32_t)round(cursor->y);
+		} else {
+			grabcx = cursor->x - grabc->geom.x;
+			grabcy = cursor->y - grabc->geom.y;
+		}
 		wlr_cursor_set_xcursor(cursor, cursor_mgr, "grab");
 		break;
 	case CurResize:
