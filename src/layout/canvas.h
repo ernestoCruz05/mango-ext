@@ -1,8 +1,142 @@
+static void canvas_pan_to_client(Monitor *m, Client *c);
+
+static Client *canvas_chain_end(Monitor *m, uint32_t tag, Client *ref, int dir,
+								int gap) {
+	Client *c;
+	int tolerance = 60;
+
+	wl_list_for_each(c, &clients, link) {
+		if (!VISIBLEON(c, m) || c == ref || c->isunglobal)
+			continue;
+		if (c->canvas_geom[tag].width == 0 || c->canvas_geom[tag].height == 0)
+			continue;
+
+		int cx1 = c->canvas_geom[tag].x;
+		int cy1 = c->canvas_geom[tag].y;
+		int cx2 = cx1 + c->canvas_geom[tag].width;
+		int cy2 = cy1 + c->canvas_geom[tag].height;
+		int rx1 = ref->canvas_geom[tag].x;
+		int ry1 = ref->canvas_geom[tag].y;
+		int rx2 = rx1 + ref->canvas_geom[tag].width;
+		int ry2 = ry1 + ref->canvas_geom[tag].height;
+
+		bool overlaps_h = cx1 < rx2 && cx2 > rx1;
+		bool overlaps_v = cy1 < ry2 && cy2 > ry1;
+
+		bool adjacent = false;
+		switch (dir) {
+		case 1:
+			adjacent = overlaps_v && abs(cx2 - (rx1 - gap)) < tolerance;
+			break;
+		case 2:
+			adjacent = overlaps_v && abs(cx1 - (rx2 + gap)) < tolerance;
+			break;
+		case 3:
+			adjacent = overlaps_h && abs(cy2 - (ry1 - gap)) < tolerance;
+			break;
+		case 4:
+			adjacent = overlaps_h && abs(cy1 - (ry2 + gap)) < tolerance;
+			break;
+		}
+
+		if (adjacent)
+			return canvas_chain_end(m, tag, c, dir, gap);
+	}
+
+	return ref;
+}
+
 static void canvas_geom_init(Client *c, Monitor *m, uint32_t tag, float pan_x,
 							 float pan_y, int *cascade_idx) {
 	int w = c->geom.width > 0 ? c->geom.width : 640;
 	int h = c->geom.height > 0 ? c->geom.height : 480;
 	float zoom = m->pertag->canvas_zoom[tag];
+
+	int tiling = config.canvas_tiling;
+
+	if (tiling > 0 && !client_is_float_type(c) && !client_get_parent(c) &&
+		!c->is_in_scratchpad && !c->isnamedscratchpad && !c->canvas_notile) {
+		Client *focused = NULL, *tmp;
+		wl_list_for_each(tmp, &fstack, flink) {
+			if (tmp == c || tmp->iskilling || tmp->isunglobal)
+				continue;
+			if (VISIBLEON(tmp, m)) {
+				focused = tmp;
+				break;
+			}
+		}
+		float vp_w = m->w.width / zoom;
+		float vp_h = m->w.height / zoom;
+		bool focused_in_viewport =
+			focused && focused->canvas_geom[tag].width > 0 &&
+			focused->canvas_geom[tag].height > 0 &&
+			focused->canvas_geom[tag].x + focused->canvas_geom[tag].width >
+				pan_x &&
+			focused->canvas_geom[tag].y + focused->canvas_geom[tag].height >
+				pan_y &&
+			focused->canvas_geom[tag].x < pan_x + vp_w &&
+			focused->canvas_geom[tag].y < pan_y + vp_h;
+
+		if (focused_in_viewport) {
+			int dir = tiling;
+			int gap = config.canvas_tiling_gap;
+
+			if (tiling == 5) {
+				float fx = focused->canvas_geom[tag].x;
+				float fy = focused->canvas_geom[tag].y;
+				float fw = focused->canvas_geom[tag].width;
+				float fh = focused->canvas_geom[tag].height;
+
+				float mouse_cx = pan_x + (cursor->x - m->w.x) / zoom;
+				float mouse_cy = pan_y + (cursor->y - m->w.y) / zoom;
+
+				float dl = fabsf(mouse_cx - fx);
+				float dr = fabsf(mouse_cx - (fx + fw));
+				float du = fabsf(mouse_cy - fy);
+				float dd = fabsf(mouse_cy - (fy + fh));
+
+				float min = dl;
+				dir = 1;
+				if (dr < min) {
+					min = dr;
+					dir = 2;
+				}
+				if (du < min) {
+					min = du;
+					dir = 3;
+				}
+				if (dd < min) {
+					dir = 4;
+				}
+			}
+
+			Client *end = canvas_chain_end(m, tag, focused, dir, gap);
+
+			switch (dir) {
+			case 1:
+				c->canvas_geom[tag].x = end->canvas_geom[tag].x - w - gap;
+				c->canvas_geom[tag].y = end->canvas_geom[tag].y;
+				break;
+			case 2:
+				c->canvas_geom[tag].x =
+					end->canvas_geom[tag].x + end->canvas_geom[tag].width + gap;
+				c->canvas_geom[tag].y = end->canvas_geom[tag].y;
+				break;
+			case 3:
+				c->canvas_geom[tag].x = end->canvas_geom[tag].x;
+				c->canvas_geom[tag].y = end->canvas_geom[tag].y - h - gap;
+				break;
+			case 4:
+				c->canvas_geom[tag].x = end->canvas_geom[tag].x;
+				c->canvas_geom[tag].y = end->canvas_geom[tag].y +
+										end->canvas_geom[tag].height + gap;
+				break;
+			}
+			c->canvas_geom[tag].width = w;
+			c->canvas_geom[tag].height = h;
+			return;
+		}
+	}
 
 	float cx = pan_x + (m->w.width / 2.0f) / zoom;
 	float cy = pan_y + (m->w.height / 2.0f) / zoom;
@@ -77,6 +211,7 @@ static void canvas(Monitor *m) {
 	float zoom = m->pertag->canvas_zoom[tag];
 
 	int cascade_idx = 0;
+	Client *newly_tiled = NULL;
 
 	wl_list_for_each(c, &clients, link) {
 		if (!VISIBLEON(c, m) || c->isunglobal)
@@ -85,8 +220,11 @@ static void canvas(Monitor *m) {
 		if (c->isfullscreen || c->ismaximizescreen)
 			continue;
 
-		if (c->canvas_geom[tag].width == 0 && c->canvas_geom[tag].height == 0)
+		if (c->canvas_geom[tag].width == 0 && c->canvas_geom[tag].height == 0) {
 			canvas_geom_init(c, m, tag, pan_x, pan_y, &cascade_idx);
+			if (config.canvas_tiling > 0 && !newly_tiled)
+				newly_tiled = c;
+		}
 
 		struct wlr_box screen_geom = {
 			.x = m->w.x +
@@ -112,6 +250,9 @@ static void canvas(Monitor *m) {
 			resize(c, screen_geom, 0);
 		}
 	}
+
+	if (newly_tiled)
+		canvas_pan_to_client(m, newly_tiled);
 }
 
 static void canvas_pan_to_client(Monitor *m, Client *c) {

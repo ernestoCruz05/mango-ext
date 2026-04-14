@@ -445,6 +445,7 @@ struct Client {
 	float unfocused_opacity;
 	char oldmonname[128];
 	struct wlr_ext_foreign_toplevel_handle_v1 *ext_foreign_toplevel;
+	int32_t canvas_notile;
 	double master_mfact_per, master_inner_per, stack_inner_per;
 	double old_master_mfact_per, old_master_inner_per, old_stack_inner_per;
 	double old_scroller_pproportion;
@@ -562,6 +563,10 @@ struct Monitor {
 	bool canvas_overview_closing;	// true while animating out
 	float canvas_overview_progress; // 0.0 = hidden, 1.0 = fully visible
 	uint32_t canvas_overview_anim_start;
+	bool     canvas_pan_anim_active;
+	float    canvas_pan_anim_start_x, canvas_pan_anim_start_y;
+	float    canvas_pan_anim_target_x, canvas_pan_anim_target_y;
+	uint32_t canvas_pan_anim_start_ms;
 	struct wlr_scene_output *scene_output;
 	struct wlr_output_state pending;
 	struct wl_listener frame;
@@ -595,6 +600,7 @@ struct Monitor {
 	uint32_t visible_tiling_clients;
 	uint32_t visible_scroll_tiling_clients;
 	char last_surface_ws_name[256];
+	int8_t carousel_anim_dir;
 	struct wlr_ext_workspace_group_handle_v1 *ext_group;
 	bool canvas_in_overview;
 	float canvas_saved_pan_x;
@@ -1053,6 +1059,9 @@ struct Pertag {
 	float canvas_pan_x[LENGTH(tags) + 1];
 	float canvas_pan_y[LENGTH(tags) + 1];
 	float canvas_zoom[LENGTH(tags) + 1]; /* visual zoom factor, 1.0 = no zoom */
+	float    canvas_anchor_x[LENGTH(tags) + 1][9];
+	float    canvas_anchor_y[LENGTH(tags) + 1][9];
+	uint16_t canvas_anchor_valid[LENGTH(tags) + 1];
 	struct DwindleNode *dwindle_root[LENGTH(tags) + 1];
 };
 
@@ -1534,6 +1543,7 @@ static void apply_rule_properties(Client *c, const ConfigWinRule *r) {
 	APPLY_INT_PROP(c, r, isnosizehint);
 	APPLY_INT_PROP(c, r, indleinhibit_when_focus);
 	APPLY_INT_PROP(c, r, isunglobal);
+	APPLY_INT_PROP(c, r, canvas_notile);
 	APPLY_INT_PROP(c, r, allow_shortcuts_inhibit);
 
 	APPLY_FLOAT_PROP(c, r, scroller_proportion);
@@ -3977,24 +3987,6 @@ keybinding(uint32_t state, bool locked, uint32_t mods, xkb_keysym_t sym,
 		return false;
 	}
 
-	if (state == WL_KEYBOARD_KEY_STATE_PRESSED && !locked &&
-		(CLEANMASK(mods) & WLR_MODIFIER_LOGO) && selmon) {
-		if (xkb_keysym_to_lower(sym) == XKB_KEY_o) {
-			toggleminimap(&(Arg){0});
-			return 1;
-		}
-	}
-
-	if (state == WL_KEYBOARD_KEY_STATE_PRESSED && !locked &&
-		(CLEANMASK(mods) & WLR_MODIFIER_LOGO) && selmon &&
-		selmon->pertag->ltidxs[selmon->pertag->curtag]->id == CANVAS) {
-		xkb_keysym_t lower = xkb_keysym_to_lower(sym);
-		if (lower == XKB_KEY_p) {
-			canvas_overview_toggle(&(Arg){0});
-			return 1;
-		}
-	}
-
 	for (ji = 0; ji < config.key_bindings_count; ji++) {
 		if (config.key_bindings_count < 1)
 			break;
@@ -4249,6 +4241,7 @@ void init_client_properties(Client *c) {
 	c->istagsilent = 0;
 	c->noswallow = 0;
 	c->isterm = 0;
+	c->canvas_notile = 0;
 	c->tearing_hint = 0;
 	c->overview_isfullscreenbak = 0;
 	c->overview_ismaximizescreenbak = 0;
@@ -5237,6 +5230,30 @@ void rendermon(struct wl_listener *listener, void *data) {
 			}
 		}
 
+		{
+			static const float anchor_colors[9][4] = {
+				{1.0f, 0.3f, 0.3f, 0.9f},
+				{1.0f, 0.6f, 0.2f, 0.9f},
+				{1.0f, 0.9f, 0.2f, 0.9f},
+				{0.4f, 0.9f, 0.3f, 0.9f},
+				{0.2f, 0.8f, 0.8f, 0.9f},
+				{0.3f, 0.5f, 1.0f, 0.9f},
+				{0.6f, 0.3f, 1.0f, 0.9f},
+				{1.0f, 0.4f, 0.7f, 0.9f},
+				{1.0f, 1.0f, 1.0f, 0.9f},
+			};
+			uint16_t valid = m->pertag->canvas_anchor_valid[tag];
+			for (int ai = 0; ai < 9; ai++) {
+				if (!(valid & (1 << ai)))
+					continue;
+				int ax = (int)((m->pertag->canvas_anchor_x[tag][ai] - min_x) * scale) - 3;
+				int ay = (int)((m->pertag->canvas_anchor_y[tag][ai] - min_y) * scale) - 3;
+				struct wlr_scene_rect *ar =
+					wlr_scene_rect_create(minimap_scene_tree, 6, 6, anchor_colors[ai]);
+				wlr_scene_node_set_position(&ar->node, ax, ay);
+			}
+		}
+
 		float pan_x = m->pertag->canvas_pan_x[tag];
 		float pan_y = m->pertag->canvas_pan_y[tag];
 		float zoom = m->pertag->canvas_zoom[tag];
@@ -5270,6 +5287,36 @@ void rendermon(struct wl_listener *listener, void *data) {
 	} else if (!m->minimap_visible && minimap_scene_tree) {
 		wlr_scene_node_destroy(&minimap_scene_tree->node);
 		minimap_scene_tree = NULL;
+	}
+
+	if (m->canvas_pan_anim_active &&
+		m->pertag->ltidxs[m->pertag->curtag]->id == CANVAS) {
+		uint32_t tag = m->pertag->curtag;
+		uint32_t anim_duration = 300;
+		uint32_t elapsed = get_now_in_ms() - m->canvas_pan_anim_start_ms;
+		float raw_t = (float)elapsed / (float)anim_duration;
+		if (raw_t > 1.0f)
+			raw_t = 1.0f;
+
+		float t = (float)find_animation_curve_at((double)raw_t, OPAFADEOUT);
+
+		m->pertag->canvas_pan_x[tag] =
+			m->canvas_pan_anim_start_x +
+			(m->canvas_pan_anim_target_x - m->canvas_pan_anim_start_x) * t;
+		m->pertag->canvas_pan_y[tag] =
+			m->canvas_pan_anim_start_y +
+			(m->canvas_pan_anim_target_y - m->canvas_pan_anim_start_y) * t;
+
+		canvas_reposition(m);
+
+		if (raw_t >= 1.0f) {
+			m->pertag->canvas_pan_x[tag] = m->canvas_pan_anim_target_x;
+			m->pertag->canvas_pan_y[tag] = m->canvas_pan_anim_target_y;
+			m->canvas_pan_anim_active = false;
+			canvas_reposition(m);
+		} else {
+			need_more_frames = true;
+		}
 	}
 
 	if (m->canvas_overview_visible &&
@@ -7299,6 +7346,8 @@ void unmapnotify(struct wl_listener *listener, void *data) {
 
 		if (nextfocus) {
 			focusclient(nextfocus, 0);
+			if (config.canvas_pan_on_kill && selmon && is_canvas_layout(selmon))
+				canvas_pan_to_client(selmon, nextfocus);
 		}
 
 		if (!nextfocus && selmon->isoverview) {

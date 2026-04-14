@@ -93,6 +93,7 @@ typedef struct {
 	int32_t force_tiled_state;
 	int32_t force_tearing;
 	int32_t noswallow;
+	int32_t canvas_notile;
 	float focused_opacity;
 	float unfocused_opacity;
 	float scroller_proportion_single;
@@ -290,6 +291,11 @@ typedef struct {
 	uint32_t gappoh;
 	uint32_t gappov;
 	uint32_t borderpx;
+	int32_t canvas_tiling;
+	int32_t canvas_tiling_gap;
+	int32_t canvas_pan_on_kill;
+	int32_t canvas_anchor_animate;
+	int32_t tag_carousel;
 	float scratchpad_width_ratio;
 	float scratchpad_height_ratio;
 	float rootcolor[4];
@@ -1296,6 +1302,22 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 		(*arg).f = atof(arg_value);
 	} else if (strcmp(func_name, "canvas_overview_toggle") == 0) {
 		func = canvas_overview_toggle;
+	} else if (strcmp(func_name, "canvas_pan") == 0) {
+		func = canvas_pan;
+		(*arg).f = atof(arg_value);
+		(*arg).f2 = atof(arg_value2);
+	} else if (strcmp(func_name, "canvas_fill_viewport") == 0) {
+		func = canvas_fill_viewport;
+	} else if (strcmp(func_name, "canvas_centerview") == 0) {
+		func = canvas_centerview;
+	} else if (strcmp(func_name, "canvas_drag_pan") == 0) {
+		func = canvas_drag_pan;
+	} else if (strcmp(func_name, "canvas_anchor_set") == 0) {
+		func = canvas_anchor_set;
+		(*arg).i = atoi(arg_value);
+	} else if (strcmp(func_name, "canvas_anchor_go") == 0) {
+		func = canvas_anchor_go;
+		(*arg).i = atoi(arg_value);
 	} else {
 		return NULL;
 	}
@@ -1765,6 +1787,16 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->scratchpad_height_ratio = atof(value);
 	} else if (strcmp(key, "borderpx") == 0) {
 		config->borderpx = atoi(value);
+	} else if (strcmp(key, "canvas_tiling") == 0) {
+		config->canvas_tiling = atoi(value);
+	} else if (strcmp(key, "canvas_tiling_gap") == 0) {
+		config->canvas_tiling_gap = atoi(value);
+	} else if (strcmp(key, "canvas_pan_on_kill") == 0) {
+		config->canvas_pan_on_kill = atoi(value);
+	} else if (strcmp(key, "canvas_anchor_animate") == 0) {
+		config->canvas_anchor_animate = atoi(value);
+	} else if (strcmp(key, "tag_carousel") == 0) {
+		config->tag_carousel = atoi(value);
 	} else if (strcmp(key, "rootcolor") == 0) {
 		int64_t color = parse_color(value);
 		if (color == -1) {
@@ -2111,6 +2143,7 @@ bool parse_option(Config *config, char *key, char *value) {
 		rule->force_tiled_state = -1;
 		rule->force_tearing = -1;
 		rule->noswallow = -1;
+		rule->canvas_notile = -1;
 		rule->nofocus = -1;
 		rule->nofadein = -1;
 		rule->nofadeout = -1;
@@ -2226,6 +2259,8 @@ bool parse_option(Config *config, char *key, char *value) {
 					rule->force_tearing = atoi(val);
 				} else if (strcmp(key, "noswallow") == 0) {
 					rule->noswallow = atoi(val);
+				} else if (strcmp(key, "canvas_notile") == 0) {
+					rule->canvas_notile = atoi(val);
 				} else if (strcmp(key, "scroller_proportion") == 0) {
 					rule->scroller_proportion = atof(val);
 				} else if (strcmp(key, "isfullscreen") == 0) {
@@ -3455,6 +3490,11 @@ void set_value_default() {
 	config.idleinhibit_ignore_visible = 0;
 
 	config.borderpx = 4;
+	config.canvas_tiling = 0;
+	config.canvas_tiling_gap = 10;
+	config.canvas_pan_on_kill = 1;
+	config.canvas_anchor_animate = 0;
+	config.tag_carousel = 0;
 	config.overviewgappi = 5;
 	config.overviewgappo = 30;
 	config.cursor_hide_timeout = 0;

@@ -388,7 +388,10 @@ int32_t moveresize(const Arg *arg) {
 		return 0;
 	}
 	/* Float the window and tell motionnotify to grab it */
-	if (grabc->isfloating == 0 && arg->ui == CurMove) {
+	if (grabc->isfloating == 0 && arg->ui == CurMove &&
+		!(grabc->mon &&
+		  grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id ==
+				CANVAS)) {
 		grabc->drag_to_tile = true;
 		exit_scroller_stack(grabc);
 		setfloating(grabc, 1);
@@ -413,7 +416,10 @@ int32_t moveresize(const Arg *arg) {
 	case CurResize:
 		/* Doesn't work for X11 output - the next absolute motion event
 		 * returns the cursor to where it started */
-		if (grabc->isfloating) {
+		if (grabc->isfloating ||
+			(grabc->mon &&
+			 grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id ==
+				CANVAS)) {
 			rzcorner = config.drag_corner;
 			grabcx = (int)round(cursor->x);
 			grabcy = (int)round(cursor->y);
@@ -1502,13 +1508,17 @@ int32_t viewtoleft(const Arg *arg) {
 	target >>= 1;
 
 	if (target == 0) {
-		return 0;
+		if (!config.tag_carousel)
+			return 0;
+		target = (1 << (LENGTH(tags) - 1)) & TAGMASK;
+		selmon->carousel_anim_dir = -1;
 	}
 
 	if (!selmon || (target) == selmon->tagset[selmon->seltags])
 		return 0;
 
 	view(&(Arg){.ui = target & TAGMASK, .i = arg->i}, true);
+	selmon->carousel_anim_dir = 0;
 	return 0;
 }
 
@@ -1525,10 +1535,14 @@ int32_t viewtoright(const Arg *arg) {
 	if (!selmon || (target) == selmon->tagset[selmon->seltags])
 		return 0;
 	if (!(target & TAGMASK)) {
-		return 0;
+		if (!config.tag_carousel)
+			return 0;
+		target = 1;
+		selmon->carousel_anim_dir = 1;
 	}
 
 	view(&(Arg){.ui = target & TAGMASK, .i = arg->i}, true);
+	selmon->carousel_anim_dir = 0;
 	return 0;
 }
 
@@ -1554,8 +1568,23 @@ int32_t viewtoleft_have_client(const Arg *arg) {
 		}
 	}
 
-	if (found)
+	bool wrapped = false;
+	if (!found && config.tag_carousel) {
+		for (n = LENGTH(tags); n > current; n--) {
+			if (get_tag_status(n, selmon)) {
+				found = true;
+				wrapped = true;
+				break;
+			}
+		}
+	}
+
+	if (found) {
+		if (wrapped)
+			selmon->carousel_anim_dir = -1;
 		view(&(Arg){.ui = (1 << (n - 1)) & TAGMASK, .i = arg->i}, true);
+		selmon->carousel_anim_dir = 0;
+	}
 	return 0;
 }
 
@@ -1581,8 +1610,23 @@ int32_t viewtoright_have_client(const Arg *arg) {
 		}
 	}
 
-	if (found)
+	bool wrapped = false;
+	if (!found && config.tag_carousel) {
+		for (n = 1; n < current; n++) {
+			if (get_tag_status(n, selmon)) {
+				found = true;
+				wrapped = true;
+				break;
+			}
+		}
+	}
+
+	if (found) {
+		if (wrapped)
+			selmon->carousel_anim_dir = 1;
 		view(&(Arg){.ui = (1 << (n - 1)) & TAGMASK, .i = arg->i}, true);
+		selmon->carousel_anim_dir = 0;
+	}
 	return 0;
 }
 
@@ -1945,6 +1989,129 @@ int32_t canvas_overview_toggle(const Arg *arg) {
 		selmon->canvas_overview_anim_start = get_now_in_ms();
 	}
 	request_fresh_all_monitors();
+	return 0;
+}
+
+int32_t canvas_pan(const Arg *arg) {
+	if (!selmon || !is_canvas_layout(selmon))
+		return 0;
+
+	Client *fs = focustop(selmon);
+	if (fs && fs->isfullscreen)
+		return 0;
+
+	uint32_t tag = selmon->pertag->curtag;
+	float zoom = selmon->pertag->canvas_zoom[tag];
+
+	selmon->pertag->canvas_pan_x[tag] -= arg->f / zoom;
+	selmon->pertag->canvas_pan_y[tag] -= arg->f2 / zoom;
+
+	canvas_reposition(selmon);
+	return 0;
+}
+
+int32_t canvas_centerview(const Arg *arg) {
+	if (!selmon || !is_canvas_layout(selmon))
+		return 0;
+
+	Client *c = selmon->sel;
+	if (!c || c->isfullscreen || c->ismaximizescreen)
+		return 0;
+
+	uint32_t tag = selmon->pertag->curtag;
+	float zoom = selmon->pertag->canvas_zoom[tag];
+
+	float cx = c->canvas_geom[tag].x + c->canvas_geom[tag].width / 2.0f;
+	float cy = c->canvas_geom[tag].y + c->canvas_geom[tag].height / 2.0f;
+
+	selmon->pertag->canvas_pan_x[tag] = cx - (selmon->w.width / zoom) / 2.0f;
+	selmon->pertag->canvas_pan_y[tag] = cy - (selmon->w.height / zoom) / 2.0f;
+
+	canvas_reposition(selmon);
+	return 0;
+}
+
+int32_t canvas_fill_viewport(const Arg *arg) {
+	if (!selmon || !is_canvas_layout(selmon))
+		return 0;
+
+	Client *c = selmon->sel;
+	if (!c || c->isfullscreen || c->ismaximizescreen)
+		return 0;
+
+	uint32_t tag = selmon->pertag->curtag;
+	float zoom = selmon->pertag->canvas_zoom[tag];
+	float pan_x = selmon->pertag->canvas_pan_x[tag];
+	float pan_y = selmon->pertag->canvas_pan_y[tag];
+
+	c->canvas_geom[tag].x = (int32_t)roundf(pan_x + config.gappoh / zoom);
+	c->canvas_geom[tag].y = (int32_t)roundf(pan_y + config.gappov / zoom);
+	c->canvas_geom[tag].width =
+		(int32_t)roundf((selmon->w.width - 2 * config.gappoh) / zoom);
+	c->canvas_geom[tag].height =
+		(int32_t)roundf((selmon->w.height - 2 * config.gappov) / zoom);
+	c->iscustomsize = 1;
+
+	arrange(selmon, false, false);
+	return 0;
+}
+
+int32_t canvas_drag_pan(const Arg *arg) {
+	if (!selmon || !is_canvas_layout(selmon))
+		return 0;
+	if (cursor_in_minimap(selmon, cursor->x, cursor->y))
+		return 0;
+	Client *fs = focustop(selmon);
+	if (fs && fs->isfullscreen)
+		return 0;
+	grabcx = (int32_t)round(cursor->x);
+	grabcy = (int32_t)round(cursor->y);
+	cursor_mode = CurPan;
+	wlr_cursor_set_xcursor(cursor, cursor_mgr, "grabbing");
+	return 0;
+}
+
+int32_t canvas_anchor_set(const Arg *arg) {
+	if (!selmon || !is_canvas_layout(selmon))
+		return 0;
+	int idx = arg->i;
+	if (idx < 0 || idx > 8)
+		return 0;
+	uint32_t tag = selmon->pertag->curtag;
+	selmon->pertag->canvas_anchor_x[tag][idx] =
+		selmon->pertag->canvas_pan_x[tag];
+	selmon->pertag->canvas_anchor_y[tag][idx] =
+		selmon->pertag->canvas_pan_y[tag];
+	selmon->pertag->canvas_anchor_valid[tag] |= (uint16_t)(1 << idx);
+	return 0;
+}
+
+int32_t canvas_anchor_go(const Arg *arg) {
+	if (!selmon || !is_canvas_layout(selmon))
+		return 0;
+	int idx = arg->i;
+	if (idx < 0 || idx > 8)
+		return 0;
+	uint32_t tag = selmon->pertag->curtag;
+	if (!(selmon->pertag->canvas_anchor_valid[tag] & (1 << idx)))
+		return 0;
+
+	float target_x = selmon->pertag->canvas_anchor_x[tag][idx];
+	float target_y = selmon->pertag->canvas_anchor_y[tag][idx];
+
+	if (!config.canvas_anchor_animate) {
+		selmon->pertag->canvas_pan_x[tag] = target_x;
+		selmon->pertag->canvas_pan_y[tag] = target_y;
+		canvas_reposition(selmon);
+	} else {
+		selmon->canvas_pan_anim_start_x = selmon->pertag->canvas_pan_x[tag];
+		selmon->canvas_pan_anim_start_y = selmon->pertag->canvas_pan_y[tag];
+		selmon->canvas_pan_anim_target_x = target_x;
+		selmon->canvas_pan_anim_target_y = target_y;
+		selmon->canvas_pan_anim_start_ms = get_now_in_ms();
+		selmon->canvas_pan_anim_active = true;
+		request_fresh_all_monitors();
+	}
 	return 0;
 }
 
