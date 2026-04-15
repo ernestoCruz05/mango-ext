@@ -4600,35 +4600,77 @@ void resize_floating_window(Client *grabc) {
 	int cdx = (int)round(cursor->x) - grabcx;
 	int cdy = (int)round(cursor->y) - grabcy;
 
-	cdx = !(rzcorner & 1) && grabc->geom.width - 2 * (int)grabc->bw - cdx < 1
-			  ? 0
-			  : cdx;
-	cdy = !(rzcorner & 2) && grabc->geom.height - 2 * (int)grabc->bw - cdy < 1
-			  ? 0
-			  : cdy;
-
-	const struct wlr_box box = {
-		.x = grabc->geom.x + (rzcorner & 1 ? 0 : cdx),
-		.y = grabc->geom.y + (rzcorner & 2 ? 0 : cdy),
-		.width = grabc->geom.width + (rzcorner & 1 ? cdx : -cdx),
-		.height = grabc->geom.height + (rzcorner & 2 ? cdy : -cdy)};
-
-	grabc->float_geom = box;
 	if (grabc->mon &&
 		grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id == CANVAS) {
 		uint32_t tag = grabc->mon->pertag->curtag;
 		float zoom = grabc->mon->pertag->canvas_zoom[tag];
 		float pan_x = grabc->mon->pertag->canvas_pan_x[tag];
 		float pan_y = grabc->mon->pertag->canvas_pan_y[tag];
-		grabc->canvas_geom[tag].x =
-			(int32_t)roundf((box.x - grabc->mon->w.x) / zoom + pan_x);
-		grabc->canvas_geom[tag].y =
-			(int32_t)roundf((box.y - grabc->mon->w.y) / zoom + pan_y);
-		grabc->canvas_geom[tag].width = (int32_t)roundf(box.width / zoom);
-		grabc->canvas_geom[tag].height = (int32_t)roundf(box.height / zoom);
-	}
 
-	resize(grabc, box, 1);
+		float canvas_cdx = (float)cdx / zoom;
+		float canvas_cdy = (float)cdy / zoom;
+
+		if (!(rzcorner & 1) && grabc->canvas_geom[tag].width -
+									   2 * (int)grabc->bw - (int)canvas_cdx <
+								   1) {
+			canvas_cdx = 0;
+			cdx = 0;
+		}
+		if (!(rzcorner & 2) && grabc->canvas_geom[tag].height -
+									   2 * (int)grabc->bw - (int)canvas_cdy <
+								   1) {
+			canvas_cdy = 0;
+			cdy = 0;
+		}
+
+		if (!(rzcorner & 1)) {
+			grabc->canvas_geom[tag].x =
+				(int32_t)roundf(grabc->canvas_geom[tag].x + canvas_cdx);
+			grabc->canvas_geom[tag].width =
+				(int32_t)roundf(grabc->canvas_geom[tag].width - canvas_cdx);
+		} else {
+			grabc->canvas_geom[tag].width =
+				(int32_t)roundf(grabc->canvas_geom[tag].width + canvas_cdx);
+		}
+		if (!(rzcorner & 2)) {
+			grabc->canvas_geom[tag].y =
+				(int32_t)roundf(grabc->canvas_geom[tag].y + canvas_cdy);
+			grabc->canvas_geom[tag].height =
+				(int32_t)roundf(grabc->canvas_geom[tag].height - canvas_cdy);
+		} else {
+			grabc->canvas_geom[tag].height =
+				(int32_t)roundf(grabc->canvas_geom[tag].height + canvas_cdy);
+		}
+
+		const struct wlr_box box = {
+			.x = grabc->mon->w.x +
+				 (int32_t)roundf((grabc->canvas_geom[tag].x - pan_x) * zoom),
+			.y = grabc->mon->w.y +
+				 (int32_t)roundf((grabc->canvas_geom[tag].y - pan_y) * zoom),
+			.width = grabc->canvas_geom[tag].width,
+			.height = grabc->canvas_geom[tag].height,
+		};
+		grabc->float_geom = box;
+		resize(grabc, box, 1);
+	} else {
+		cdx = !(rzcorner & 1) &&
+					  grabc->geom.width - 2 * (int)grabc->bw - cdx < 1
+				  ? 0
+				  : cdx;
+		cdy = !(rzcorner & 2) &&
+					  grabc->geom.height - 2 * (int)grabc->bw - cdy < 1
+				  ? 0
+				  : cdy;
+
+		const struct wlr_box box = {
+			.x = grabc->geom.x + (rzcorner & 1 ? 0 : cdx),
+			.y = grabc->geom.y + (rzcorner & 2 ? 0 : cdy),
+			.width = grabc->geom.width + (rzcorner & 1 ? cdx : -cdx),
+			.height = grabc->geom.height + (rzcorner & 2 ? cdy : -cdy)};
+
+		grabc->float_geom = box;
+		resize(grabc, box, 1);
+	}
 	grabcx += cdx;
 	grabcy += cdy;
 }
@@ -6253,6 +6295,7 @@ void setfullscreen(Client *c, int32_t fullscreen) // 用自定义全屏代理自
 			wlr_scene_node_set_position(&c->scene->node, c->mon->m.x,
 										c->mon->m.y);
 			wlr_scene_node_set_position(&c->scene_surface->node, 0, 0);
+			clear_visual_zoom(c);
 			struct wlr_box full_clip = {0, 0, c->mon->m.width,
 										c->mon->m.height};
 			wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node,

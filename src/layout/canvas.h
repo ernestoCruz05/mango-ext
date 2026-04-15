@@ -192,13 +192,18 @@ static void canvas_reposition(Monitor *m) {
 		c->animainit_geom.x = new_x;
 		c->animainit_geom.y = new_y;
 
-		int new_w = (int32_t)roundf(c->canvas_geom[tag].width * zoom);
-		int new_h = (int32_t)roundf(c->canvas_geom[tag].height * zoom);
-		struct wlr_box zoomed_geom = {
-			.x = new_x, .y = new_y, .width = new_w, .height = new_h,
-		};
-		resize(c, zoomed_geom, 0);
+		wlr_scene_node_set_position(&c->scene->node, new_x, new_y);
+
+#ifdef XWAYLAND
+		if (client_is_x11(c))
+			client_set_size(c, c->geom.width - 2 * c->bw,
+							c->geom.height - 2 * c->bw);
+#endif
+
+		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, NULL);
 		client_apply_clip(c, 1.0);
+		if (zoom != 1.0f && !c->is_clip_to_hide)
+			apply_canvas_zoom_correct(c, zoom);
 	}
 }
 
@@ -226,29 +231,33 @@ static void canvas(Monitor *m) {
 				newly_tiled = c;
 		}
 
-		struct wlr_box screen_geom = {
-			.x = m->w.x +
-				 (int32_t)roundf((c->canvas_geom[tag].x - pan_x) * zoom),
-			.y = m->w.y +
-				 (int32_t)roundf((c->canvas_geom[tag].y - pan_y) * zoom),
-			.width = (int32_t)roundf(c->canvas_geom[tag].width * zoom),
-			.height = (int32_t)roundf(c->canvas_geom[tag].height * zoom),
-		};
+		int screen_x =
+			m->w.x + (int32_t)roundf((c->canvas_geom[tag].x - pan_x) * zoom);
+		int screen_y =
+			m->w.y + (int32_t)roundf((c->canvas_geom[tag].y - pan_y) * zoom);
+
+		float effective_zoom = zoom;
+		int32_t base_w = c->canvas_geom[tag].width;
+		int32_t base_h = c->canvas_geom[tag].height;
 
 		if (m->canvas_in_overview && c->canvas_geom_backup[tag].width > 0) {
-			int32_t base_w = c->canvas_geom_backup[tag].width;
-			int32_t base_h = c->canvas_geom_backup[tag].height;
-			float effective_zoom = zoom * (float)c->canvas_geom[tag].width / base_w;
-			struct wlr_box overview_geom = {
-				.x = screen_geom.x,
-				.y = screen_geom.y,
-				.width = (int32_t)roundf(base_w * effective_zoom),
-				.height = (int32_t)roundf(base_h * effective_zoom),
-			};
-			resize(c, overview_geom, 0);
-		} else {
-			resize(c, screen_geom, 0);
+			base_w = c->canvas_geom_backup[tag].width;
+			base_h = c->canvas_geom_backup[tag].height;
+			effective_zoom *= (float)c->canvas_geom[tag].width / base_w;
 		}
+
+		struct wlr_box client_geom = {
+			.x = screen_x,
+			.y = screen_y,
+			.width = base_w,
+			.height = base_h,
+		};
+		resize(c, client_geom, 0);
+
+		if (effective_zoom == 1.0f)
+			clear_visual_zoom(c);
+		else
+			apply_visual_zoom(c, effective_zoom);
 	}
 
 	if (newly_tiled)

@@ -229,6 +229,86 @@ void buffer_set_effect(Client *c, BufferData data) {
 								   scene_buffer_apply_effect, &data);
 }
 
+static void scene_buffer_apply_canvas_zoom(struct wlr_scene_buffer *buffer,
+										   int32_t sx, int32_t sy, void *data) {
+	float zoom = *(float *)data;
+	struct wlr_scene_surface *scene_surface =
+		wlr_scene_surface_try_from_buffer(buffer);
+	if (!scene_surface)
+		return;
+
+	wlr_scene_node_set_position(&buffer->node,
+								(int32_t)roundf(buffer->node.x * zoom),
+								(int32_t)roundf(buffer->node.y * zoom));
+
+	int32_t w = buffer->dst_width > 0 ? buffer->dst_width
+									  : scene_surface->surface->current.width;
+	int32_t h = buffer->dst_height > 0 ? buffer->dst_height
+									   : scene_surface->surface->current.height;
+	wlr_scene_buffer_set_dest_size(buffer, (int32_t)roundf(w * zoom),
+								   (int32_t)roundf(h * zoom));
+}
+
+static void apply_canvas_zoom_correct(Client *c, float zoom) {
+	if (!c || !c->scene)
+		return;
+	wlr_scene_node_for_each_buffer(&c->scene_surface->node,
+								   scene_buffer_apply_canvas_zoom, &zoom);
+}
+
+static void scene_buffer_apply_zoom(struct wlr_scene_buffer *buffer, int32_t sx,
+									int32_t sy, void *data) {
+	float zoom = *(float *)data;
+	struct wlr_scene_surface *scene_surface =
+		wlr_scene_surface_try_from_buffer(buffer);
+	if (!scene_surface)
+		return;
+
+	int32_t w = scene_surface->surface->current.width;
+	int32_t h = scene_surface->surface->current.height;
+	wlr_scene_buffer_set_dest_size(buffer, (int32_t)roundf(w * zoom),
+								   (int32_t)roundf(h * zoom));
+}
+
+static void scene_buffer_clear_dest_size(struct wlr_scene_buffer *buffer,
+										 int32_t sx, int32_t sy, void *data) {
+	struct wlr_scene_surface *scene_surface =
+		wlr_scene_surface_try_from_buffer(buffer);
+	if (!scene_surface)
+		return;
+	wlr_scene_buffer_set_dest_size(buffer, 0, 0);
+}
+
+static void clear_visual_zoom(Client *c) {
+	if (!c || !c->scene)
+		return;
+	wlr_scene_node_for_each_buffer(&c->scene_surface->node,
+								   scene_buffer_clear_dest_size, NULL);
+}
+
+static void apply_visual_zoom(Client *c, float zoom) {
+	if (!c || !c->scene || zoom == 1.0f)
+		return;
+	wlr_scene_node_for_each_buffer(&c->scene_surface->node,
+								   scene_buffer_apply_zoom, &zoom);
+}
+
+static float get_client_effective_zoom(Client *c) {
+	if (c->mon && is_canvas_layout(c->mon) && !c->isfullscreen &&
+		!c->ismaximizescreen) {
+		uint32_t tag = c->mon->pertag->curtag;
+		float zoom = c->mon->pertag->canvas_zoom[tag];
+		float effective_zoom = zoom;
+		if (c->mon->canvas_in_overview &&
+			c->canvas_geom_backup[tag].width > 0) {
+			effective_zoom *= (float)c->canvas_geom[tag].width /
+							  c->canvas_geom_backup[tag].width;
+		}
+		return effective_zoom;
+	}
+	return 1.0f;
+}
+
 void apply_shield(Client *c, struct wlr_box clip_box) {
 	if (active_capture_count > 0 && c->shield_when_capture) {
 		wlr_scene_node_raise_to_top(&c->shield->node);
@@ -251,6 +331,8 @@ void apply_border(Client *c) {
 	if (c->iskilling || !client_surface(c)->mapped)
 		return;
 
+	float zoom = get_client_effective_zoom(c);
+
 	hit_no_border = check_hit_no_border(c);
 
 	if (hit_no_border && config.smartgaps) {
@@ -261,7 +343,9 @@ void apply_border(Client *c) {
 		set_rect_size(c->border[1], 0, 0);
 		set_rect_size(c->border[2], 0, 0);
 		set_rect_size(c->border[3], 0, 0);
-		wlr_scene_node_set_position(&c->scene_surface->node, c->bw, c->bw);
+		wlr_scene_node_set_position(&c->scene_surface->node,
+									(int32_t)roundf(c->bw * zoom),
+									(int32_t)roundf(c->bw * zoom));
 		c->fake_no_border = true;
 		return;
 	} else if (!c->isfullscreen && VISIBLEON(c, c->mon)) {
@@ -282,14 +366,14 @@ void apply_border(Client *c) {
 		top_offset = 0;
 	} else {
 		right_offset =
-			GEZERO(c->animation.current.x + c->animation.current.width -
-				   c->mon->m.x - c->mon->m.width);
+			GEZERO(c->animation.current.x + c->animation.current.width * zoom -
+				   c->mon->m.x - c->mon->m.width) / zoom;
 		bottom_offset =
-			GEZERO(c->animation.current.y + c->animation.current.height -
-				   c->mon->m.y - c->mon->m.height);
+			GEZERO(c->animation.current.y + c->animation.current.height * zoom -
+				   c->mon->m.y - c->mon->m.height) / zoom;
 
-		left_offset = GEZERO(c->mon->m.x - c->animation.current.x);
-		top_offset = GEZERO(c->mon->m.y - c->animation.current.y);
+		left_offset = GEZERO(c->mon->m.x - c->animation.current.x) / zoom;
+		top_offset = GEZERO(c->mon->m.y - c->animation.current.y) / zoom;
 	}
 
 	int32_t border_up_width =
@@ -326,18 +410,29 @@ void apply_border(Client *c) {
 		GEZERO(fullgeom.width - bw) + GEZERO(left_offset + bw - fullgeom.width);
 	int32_t border_right_y = GEZERO(top_offset);
 
-	wlr_scene_node_set_position(&c->scene_surface->node, c->bw, c->bw);
-	set_rect_size(c->border[0], border_up_width, border_up_height);
-	set_rect_size(c->border[1], border_down_width, border_down_height);
-	set_rect_size(c->border[2], border_left_width, border_left_height);
-	set_rect_size(c->border[3], border_right_width, border_right_height);
-	wlr_scene_node_set_position(&c->border[0]->node, border_up_x, border_up_y);
-	wlr_scene_node_set_position(&c->border[2]->node, border_left_x,
-								border_left_y);
-	wlr_scene_node_set_position(&c->border[1]->node, border_down_x,
-								border_down_y);
-	wlr_scene_node_set_position(&c->border[3]->node, border_right_x,
-								border_right_y);
+	wlr_scene_node_set_position(&c->scene_surface->node,
+								(int32_t)roundf(c->bw * zoom),
+								(int32_t)roundf(c->bw * zoom));
+	set_rect_size(c->border[0], (int32_t)roundf(border_up_width * zoom),
+				  (int32_t)roundf(border_up_height * zoom));
+	set_rect_size(c->border[1], (int32_t)roundf(border_down_width * zoom),
+				  (int32_t)roundf(border_down_height * zoom));
+	set_rect_size(c->border[2], (int32_t)roundf(border_left_width * zoom),
+				  (int32_t)roundf(border_left_height * zoom));
+	set_rect_size(c->border[3], (int32_t)roundf(border_right_width * zoom),
+				  (int32_t)roundf(border_right_height * zoom));
+	wlr_scene_node_set_position(&c->border[0]->node,
+								(int32_t)roundf(border_up_x * zoom),
+								(int32_t)roundf(border_up_y * zoom));
+	wlr_scene_node_set_position(&c->border[2]->node,
+								(int32_t)roundf(border_left_x * zoom),
+								(int32_t)roundf(border_left_y * zoom));
+	wlr_scene_node_set_position(&c->border[1]->node,
+								(int32_t)roundf(border_down_x * zoom),
+								(int32_t)roundf(border_down_y * zoom));
+	wlr_scene_node_set_position(&c->border[3]->node,
+								(int32_t)roundf(border_right_x * zoom),
+								(int32_t)roundf(border_right_y * zoom));
 }
 
 struct ivec2 clip_to_hide(Client *c, struct wlr_box *clip_box) {
@@ -349,14 +444,20 @@ struct ivec2 clip_to_hide(Client *c, struct wlr_box *clip_box) {
 		!c->animation.tagouting && !is_canvas)
 		return offset;
 
+	float zoom = get_client_effective_zoom(c);
+
 	int32_t bottom_out_offset =
-		GEZERO(c->animation.current.y + c->animation.current.height -
-			   c->mon->m.y - c->mon->m.height);
+		GEZERO(c->animation.current.y + c->animation.current.height * zoom -
+			   c->mon->m.y - c->mon->m.height) /
+		zoom;
 	int32_t right_out_offset =
-		GEZERO(c->animation.current.x + c->animation.current.width -
-			   c->mon->m.x - c->mon->m.width);
-	int32_t left_out_offset = GEZERO(c->mon->m.x - c->animation.current.x);
-	int32_t top_out_offset = GEZERO(c->mon->m.y - c->animation.current.y);
+		GEZERO(c->animation.current.x + c->animation.current.width * zoom -
+			   c->mon->m.x - c->mon->m.width) /
+		zoom;
+	int32_t left_out_offset =
+		GEZERO(c->mon->m.x - c->animation.current.x) / zoom;
+	int32_t top_out_offset =
+		GEZERO(c->mon->m.y - c->animation.current.y) / zoom;
 
 	// 必须转换为int，否计算会没有负数导致判断错误
 	int32_t bw = (int32_t)c->bw;
@@ -1081,20 +1182,42 @@ bool client_draw_frame(Client *c) {
 	if (!c || !client_surface(c)->mapped)
 		return false;
 
-	if (!c->need_output_flush) {
+	bool need_flush = c->need_output_flush;
+
+	if (need_flush) {
+		if (config.animations && c->animation.running) {
+			client_animation_next_tick(c);
+		} else {
+			wlr_scene_node_set_position(&c->scene->node, c->pending.x,
+										c->pending.y);
+			c->animation.current = c->animainit_geom = c->animation.initial =
+				c->pending = c->current = c->geom;
+			client_apply_clip(c, 1.0);
+			c->need_output_flush = false;
+		}
+	}
+
+	if ((need_flush || config.animations) && c->mon &&
+		is_canvas_layout(c->mon) && !c->isfullscreen &&
+		!c->ismaximizescreen) {
+		uint32_t tag = c->mon->pertag->curtag;
+		float zoom = c->mon->pertag->canvas_zoom[tag];
+		float effective_zoom = zoom;
+		if (c->mon->canvas_in_overview &&
+			c->canvas_geom_backup[tag].width > 0) {
+			effective_zoom *= (float)c->canvas_geom[tag].width /
+							  c->canvas_geom_backup[tag].width;
+		}
+		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, NULL);
+		client_apply_clip(c, 1.0);
+		if (effective_zoom != 1.0f && !c->is_clip_to_hide)
+			apply_canvas_zoom_correct(c, effective_zoom);
+	}
+
+	if (!need_flush) {
 		return client_apply_focus_opacity(c);
 	}
 
-	if (config.animations && c->animation.running) {
-		client_animation_next_tick(c);
-	} else {
-		wlr_scene_node_set_position(&c->scene->node, c->pending.x,
-									c->pending.y);
-		c->animation.current = c->animainit_geom = c->animation.initial =
-			c->pending = c->current = c->geom;
-		client_apply_clip(c, 1.0);
-		c->need_output_flush = false;
-	}
 	client_apply_focus_opacity(c);
 	return true;
 }
