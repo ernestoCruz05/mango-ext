@@ -1001,6 +1001,8 @@ static int32_t scroller_focus_lock = 0;
 static uint32_t swipe_fingers = 0;
 static double swipe_dx = 0;
 static double swipe_dy = 0;
+static bool canvas_swipe_panning = false;
+static double pinch_last_scale = 1.0;
 
 bool render_border = true;
 
@@ -2123,6 +2125,11 @@ int32_t ongesture(struct wlr_pointer_swipe_end_event *event) {
 void swipe_begin(struct wl_listener *listener, void *data) {
 	struct wlr_pointer_swipe_begin_event *event = data;
 
+	if (event->fingers == 3 && selmon && is_canvas_layout(selmon)) {
+		canvas_swipe_panning = true;
+		return;
+	}
+
 	// Forward swipe begin event to client
 	wlr_pointer_gestures_v1_send_swipe_begin(pointer_gestures, seat,
 											 event->time_msec, event->fingers);
@@ -2130,6 +2137,15 @@ void swipe_begin(struct wl_listener *listener, void *data) {
 
 void swipe_update(struct wl_listener *listener, void *data) {
 	struct wlr_pointer_swipe_update_event *event = data;
+
+	if (canvas_swipe_panning && selmon && is_canvas_layout(selmon)) {
+		uint32_t tag = selmon->pertag->curtag;
+		float zoom = selmon->pertag->canvas_zoom[tag];
+		selmon->pertag->canvas_pan_x[tag] -= event->dx / zoom;
+		selmon->pertag->canvas_pan_y[tag] -= event->dy / zoom;
+		canvas_reposition(selmon);
+		return;
+	}
 
 	swipe_fingers = event->fingers;
 	// Accumulate swipe distance
@@ -2143,6 +2159,12 @@ void swipe_update(struct wl_listener *listener, void *data) {
 
 void swipe_end(struct wl_listener *listener, void *data) {
 	struct wlr_pointer_swipe_end_event *event = data;
+
+	if (canvas_swipe_panning) {
+		canvas_swipe_panning = false;
+		return;
+	}
+
 	ongesture(event);
 	swipe_dx = 0;
 	swipe_dy = 0;
@@ -2155,6 +2177,11 @@ void pinch_begin(struct wl_listener *listener, void *data) {
 	struct wlr_pointer_pinch_begin_event *event = data;
 
 	// Forward pinch begin event to client
+	pinch_last_scale = 1.0;
+
+	if (selmon && is_canvas_layout(selmon))
+		return;
+
 	wlr_pointer_gestures_v1_send_pinch_begin(pointer_gestures, seat,
 											 event->time_msec, event->fingers);
 }
@@ -2162,7 +2189,28 @@ void pinch_begin(struct wl_listener *listener, void *data) {
 void pinch_update(struct wl_listener *listener, void *data) {
 	struct wlr_pointer_pinch_update_event *event = data;
 
-	// Forward pinch update event to client
+	if (selmon && is_canvas_layout(selmon)) {
+		uint32_t tag = selmon->pertag->curtag;
+		float old_zoom = selmon->pertag->canvas_zoom[tag];
+
+		double ratio =
+			(pinch_last_scale > 0.0) ? event->scale / pinch_last_scale : 1.0;
+		pinch_last_scale = event->scale;
+
+		float new_zoom = CLAMP_FLOAT(old_zoom * (float)ratio, 0.1f, 1.0f);
+		selmon->pertag->canvas_zoom[tag] = new_zoom;
+
+		float cursor_sx = (float)(cursor->x - selmon->w.x);
+		float cursor_sy = (float)(cursor->y - selmon->w.y);
+		selmon->pertag->canvas_pan_x[tag] +=
+			cursor_sx * (1.0f / old_zoom - 1.0f / new_zoom);
+		selmon->pertag->canvas_pan_y[tag] +=
+			cursor_sy * (1.0f / old_zoom - 1.0f / new_zoom);
+
+		canvas_reposition(selmon);
+		return;
+	}
+
 	wlr_pointer_gestures_v1_send_pinch_update(
 		pointer_gestures, seat, event->time_msec, event->dx, event->dy,
 		event->scale, event->rotation);
@@ -2172,6 +2220,9 @@ void pinch_end(struct wl_listener *listener, void *data) {
 	struct wlr_pointer_pinch_end_event *event = data;
 
 	// Forward pinch end event to client
+	if (selmon && is_canvas_layout(selmon))
+		return;
+
 	wlr_pointer_gestures_v1_send_pinch_end(pointer_gestures, seat,
 										   event->time_msec, event->cancelled);
 }
