@@ -1306,7 +1306,8 @@ bool client_draw_frame(Client *c) {
 		}
 	}
 
-	if (c->mon && is_canvas_layout(c->mon) && !c->isfullscreen &&
+	if ((need_flush || config.animations) && c->mon &&
+		is_canvas_layout(c->mon) && !c->isfullscreen &&
 		!c->ismaximizescreen) {
 		uint32_t tag = c->mon->pertag->curtag;
 		float zoom = c->mon->pertag->canvas_zoom[tag];
