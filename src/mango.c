@@ -1726,12 +1726,17 @@ void applyrules(Client *c) {
 	int32_t fullscreen_state_backup =
 		c->isfullscreen || client_wants_fullscreen(c);
 
-	setmon(c, mon, newtags,
-		   !c->isopensilent &&
-			   !(client_is_x11_popup(c) && client_should_ignore_focus(c)) &&
-			   mon &&
-			   (!c->istagsilent || !newtags ||
-				newtags & mon->tagset[mon->seltags]));
+	bool should_init_get_focus =
+		!c->isopensilent &&
+		!(client_is_x11_popup(c) && client_should_ignore_focus(c)) && mon &&
+		(!c->istagsilent || !newtags || newtags & mon->tagset[mon->seltags]);
+
+	if (!should_init_get_focus) {
+		wl_list_remove(&c->flink);
+		wl_list_insert(fstack.prev, &c->flink);
+	}
+
+	setmon(c, mon, newtags, should_init_get_focus);
 
 	if (c->isopensilent) {
 		wl_list_remove(&c->flink);
