@@ -5300,7 +5300,6 @@ void rendermon(struct wl_listener *listener, void *data) {
 		if (!config.animations && !grabc && c->configure_serial &&
 			client_is_rendered_on_mon(c, m)) {
 			monitor_check_skip_frame_timeout(m);
-			goto skip;
 		}
 	}
 
@@ -5844,7 +5843,6 @@ void rendermon(struct wl_listener *listener, void *data) {
 		wlr_scene_output_commit(m->scene_output, NULL);
 	}
 
-skip:
 	// 发送帧完成通知
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	wlr_scene_output_send_frame_done(m->scene_output, &now);

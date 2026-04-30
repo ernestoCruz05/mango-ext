@@ -219,14 +219,9 @@ static void scene_buffer_apply_canvas_zoom(struct wlr_scene_buffer *buffer,
 	if (!scene_surface)
 		return;
 
-	wlr_scene_node_set_position(&buffer->node,
-								(int32_t)roundf(buffer->node.x * zoom),
-								(int32_t)roundf(buffer->node.y * zoom));
-
-	int32_t w = buffer->dst_width > 0 ? buffer->dst_width
-									  : scene_surface->surface->current.width;
-	int32_t h = buffer->dst_height > 0 ? buffer->dst_height
-									   : scene_surface->surface->current.height;
+	/* Use original surface dimensions to avoid compound zoom scaling. */
+	int32_t w = scene_surface->surface->current.width;
+	int32_t h = scene_surface->surface->current.height;
 	wlr_scene_buffer_set_dest_size(buffer, (int32_t)roundf(w * zoom),
 								   (int32_t)roundf(h * zoom));
 }
@@ -1306,7 +1301,7 @@ bool client_draw_frame(Client *c) {
 		}
 	}
 
-	if ((need_flush || config.animations) && c->mon &&
+	if (c->mon &&
 		is_canvas_layout(c->mon) && !c->isfullscreen &&
 		!c->ismaximizescreen) {
 		uint32_t tag = c->mon->pertag->curtag;

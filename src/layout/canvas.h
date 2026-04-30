@@ -204,8 +204,6 @@ static void canvas_reposition(Monitor *m) {
 
 		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, NULL);
 		client_apply_clip(c, 1.0);
-		if (zoom != 1.0f && !c->is_clip_to_hide)
-			apply_canvas_zoom_correct(c, zoom);
 	}
 }
 
@@ -255,11 +253,6 @@ static void canvas(Monitor *m) {
 			.height = base_h,
 		};
 		resize(c, client_geom, 0);
-
-		if (effective_zoom == 1.0f)
-			clear_visual_zoom(c);
-		else
-			apply_visual_zoom(c, effective_zoom);
 	}
 
 	if (newly_tiled)
