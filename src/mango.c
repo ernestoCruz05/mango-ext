@@ -206,7 +206,7 @@ enum {
 }; /* EWMH atoms */
 #endif
 enum { UP, DOWN, LEFT, RIGHT, UNDIR }; /* smartmovewin */
-enum { NONE, OPEN, MOVE, CLOSE, TAG, FOCUS, OPAFADEIN, OPAFADEOUT };
+enum { NONE, OPEN, MOVE, CLOSE, TAG, FOCUS, OPAFADEIN, OPAFADEOUT, CANVAS_PAN, CANVAS_ZOOM };
 enum { UNFOLD, FOLD, INVALIDFOLD };
 enum { PREV, NEXT };
 enum { STATE_UNSPECIFIED = 0, STATE_ENABLED, STATE_DISABLED };
@@ -569,6 +569,14 @@ struct Monitor {
 	float    canvas_pan_anim_start_x, canvas_pan_anim_start_y;
 	float    canvas_pan_anim_target_x, canvas_pan_anim_target_y;
 	uint32_t canvas_pan_anim_start_ms;
+	bool     canvas_zoom_anim_active;
+	float    canvas_zoom_anim_start_zoom;
+	float    canvas_zoom_anim_target_zoom;
+	float    canvas_zoom_anim_start_pan_x;
+	float    canvas_zoom_anim_target_pan_x;
+	float    canvas_zoom_anim_start_pan_y;
+	float    canvas_zoom_anim_target_pan_y;
+	uint32_t canvas_zoom_anim_start_ms;
 	struct wlr_scene_output *scene_output;
 	struct wlr_output_state pending;
 	struct wl_listener frame;
@@ -1002,6 +1010,8 @@ struct dvec2 *baked_points_close;
 struct dvec2 *baked_points_focus;
 struct dvec2 *baked_points_opafadein;
 struct dvec2 *baked_points_opafadeout;
+struct dvec2 *baked_points_canvas_pan;
+struct dvec2 *baked_points_canvas_zoom;
 
 static struct wl_event_source *hide_cursor_source;
 static struct wl_event_source *keep_idle_inhibit_source;
@@ -5465,13 +5475,15 @@ void rendermon(struct wl_listener *listener, void *data) {
 	if (m->canvas_pan_anim_active &&
 		m->pertag->ltidxs[m->pertag->curtag]->id == CANVAS) {
 		uint32_t tag = m->pertag->curtag;
-		uint32_t anim_duration = 300;
+		uint32_t anim_duration = config.animation_duration_canvas_pan;
 		uint32_t elapsed = get_now_in_ms() - m->canvas_pan_anim_start_ms;
-		float raw_t = (float)elapsed / (float)anim_duration;
+		float raw_t = anim_duration
+			? (float)elapsed / (float)anim_duration
+			: 1.0f;
 		if (raw_t > 1.0f)
 			raw_t = 1.0f;
 
-		float t = (float)find_animation_curve_at((double)raw_t, OPAFADEOUT);
+		float t = (float)find_animation_curve_at((double)raw_t, CANVAS_PAN);
 
 		m->pertag->canvas_pan_x[tag] =
 			m->canvas_pan_anim_start_x +
@@ -5486,6 +5498,42 @@ void rendermon(struct wl_listener *listener, void *data) {
 			m->pertag->canvas_pan_x[tag] = m->canvas_pan_anim_target_x;
 			m->pertag->canvas_pan_y[tag] = m->canvas_pan_anim_target_y;
 			m->canvas_pan_anim_active = false;
+			canvas_reposition(m);
+		} else {
+			need_more_frames = true;
+		}
+	}
+
+	if (m->canvas_zoom_anim_active &&
+		m->pertag->ltidxs[m->pertag->curtag]->id == CANVAS) {
+		uint32_t tag = m->pertag->curtag;
+		uint32_t anim_duration = config.animation_duration_canvas_zoom;
+		uint32_t elapsed = get_now_in_ms() - m->canvas_zoom_anim_start_ms;
+		double raw_t = anim_duration
+			? (double)elapsed / (double)anim_duration
+			: 1.0;
+		if (raw_t > 1.0)
+			raw_t = 1.0;
+
+		float t = (float)find_animation_curve_at(raw_t, CANVAS_ZOOM);
+
+		m->pertag->canvas_zoom[tag] =
+			m->canvas_zoom_anim_start_zoom +
+			(m->canvas_zoom_anim_target_zoom - m->canvas_zoom_anim_start_zoom) * t;
+		m->pertag->canvas_pan_x[tag] =
+			m->canvas_zoom_anim_start_pan_x +
+			(m->canvas_zoom_anim_target_pan_x - m->canvas_zoom_anim_start_pan_x) * t;
+		m->pertag->canvas_pan_y[tag] =
+			m->canvas_zoom_anim_start_pan_y +
+			(m->canvas_zoom_anim_target_pan_y - m->canvas_zoom_anim_start_pan_y) * t;
+
+		canvas_reposition(m);
+
+		if (raw_t >= 1.0) {
+			m->pertag->canvas_zoom[tag] = m->canvas_zoom_anim_target_zoom;
+			m->pertag->canvas_pan_x[tag] = m->canvas_zoom_anim_target_pan_x;
+			m->pertag->canvas_pan_y[tag] = m->canvas_zoom_anim_target_pan_y;
+			m->canvas_zoom_anim_active = false;
 			canvas_reposition(m);
 		} else {
 			need_more_frames = true;

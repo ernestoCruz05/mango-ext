@@ -218,6 +218,10 @@ typedef struct {
 	double animation_curve_focus[4];
 	double animation_curve_opafadein[4];
 	double animation_curve_opafadeout[4];
+	uint32_t animation_duration_canvas_pan;
+	double   animation_curve_canvas_pan[4];
+	uint32_t animation_duration_canvas_zoom;
+	double   animation_curve_canvas_zoom[4];
 
 	int32_t scroller_structs;
 	float scroller_default_proportion;
@@ -1484,6 +1488,30 @@ bool parse_option(Config *config, char *key, char *value) {
 			fprintf(stderr,
 					"\033[1m\033[31m[ERROR]:\033[33m Failed to parse "
 					"animation_curve_opafadeout: %s\n",
+					value);
+			return false;
+		}
+	} else if (strcmp(key, "animation_duration_canvas_pan") == 0) {
+		config->animation_duration_canvas_pan = atoi(value);
+	} else if (strcmp(key, "animation_duration_canvas_zoom") == 0) {
+		config->animation_duration_canvas_zoom = atoi(value);
+	} else if (strcmp(key, "animation_curve_canvas_pan") == 0) {
+		int32_t num =
+			parse_double_array(value, config->animation_curve_canvas_pan, 4);
+		if (num != 4) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Failed to parse "
+					"animation_curve_canvas_pan: %s\n",
+					value);
+			return false;
+		}
+	} else if (strcmp(key, "animation_curve_canvas_zoom") == 0) {
+		int32_t num =
+			parse_double_array(value, config->animation_curve_canvas_zoom, 4);
+		if (num != 4) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Failed to parse "
+					"animation_curve_canvas_zoom: %s\n",
 					value);
 			return false;
 		}
@@ -3108,6 +3136,14 @@ void free_baked_points(void) {
 		free(baked_points_opafadeout);
 		baked_points_opafadeout = NULL;
 	}
+	if (baked_points_canvas_pan) {
+		free(baked_points_canvas_pan);
+		baked_points_canvas_pan = NULL;
+	}
+	if (baked_points_canvas_zoom) {
+		free(baked_points_canvas_zoom);
+		baked_points_canvas_zoom = NULL;
+	}
 }
 
 void free_config(void) {
@@ -3406,6 +3442,10 @@ void override_config(void) {
 		CLAMP_INT(config.animation_duration_close, 1, 50000);
 	config.animation_duration_focus =
 		CLAMP_INT(config.animation_duration_focus, 1, 50000);
+	config.animation_duration_canvas_pan =
+		CLAMP_INT(config.animation_duration_canvas_pan, 1, 50000);
+	config.animation_duration_canvas_zoom =
+		CLAMP_INT(config.animation_duration_canvas_zoom, 1, 50000);
 	config.scroller_default_proportion =
 		CLAMP_FLOAT(config.scroller_default_proportion, 0.1f, 1.0f);
 	config.scroller_default_proportion_single =
@@ -3563,6 +3603,8 @@ void set_value_default() {
 	config.animation_duration_tag = 300;
 	config.animation_duration_close = 300;
 	config.animation_duration_focus = 0;
+	config.animation_duration_canvas_pan = 300;
+	config.animation_duration_canvas_zoom = 300;
 
 	config.axis_bind_apply_timeout = 100;
 	config.focus_on_activate = 1;
@@ -3716,6 +3758,14 @@ void set_value_default() {
 	config.animation_curve_opafadeout[1] = 0.5;
 	config.animation_curve_opafadeout[2] = 0.5;
 	config.animation_curve_opafadeout[3] = 0.5;
+	config.animation_curve_canvas_pan[0] = 0.46;
+	config.animation_curve_canvas_pan[1] = 1.0;
+	config.animation_curve_canvas_pan[2] = 0.29;
+	config.animation_curve_canvas_pan[3] = 0.99;
+	config.animation_curve_canvas_zoom[0] = 0.46;
+	config.animation_curve_canvas_zoom[1] = 1.0;
+	config.animation_curve_canvas_zoom[2] = 0.29;
+	config.animation_curve_canvas_zoom[3] = 0.99;
 
 	config.rootcolor[0] = 0x32 / 255.0f;
 	config.rootcolor[1] = 0x32 / 255.0f;

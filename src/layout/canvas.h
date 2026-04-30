@@ -289,7 +289,21 @@ static void canvas_pan_to_client(Monitor *m, Client *c) {
 		cy + ch <= pan_y + vp_h)
 		return;
 
-	m->pertag->canvas_pan_x[tag] = cx + cw / 2.0f - vp_w / 2.0f;
-	m->pertag->canvas_pan_y[tag] = cy + ch / 2.0f - vp_h / 2.0f;
-	canvas_reposition(m);
+	float target_x = cx + cw / 2.0f - vp_w / 2.0f;
+	float target_y = cy + ch / 2.0f - vp_h / 2.0f;
+
+	if (!config.animations || config.animation_duration_canvas_pan <= 1) {
+		m->pertag->canvas_pan_x[tag] = target_x;
+		m->pertag->canvas_pan_y[tag] = target_y;
+		canvas_reposition(m);
+	} else {
+		m->canvas_zoom_anim_active = false;
+		m->canvas_pan_anim_start_x = m->pertag->canvas_pan_x[tag];
+		m->canvas_pan_anim_start_y = m->pertag->canvas_pan_y[tag];
+		m->canvas_pan_anim_target_x = target_x;
+		m->canvas_pan_anim_target_y = target_y;
+		m->canvas_pan_anim_start_ms = get_now_in_ms();
+		m->canvas_pan_anim_active = true;
+		request_fresh_all_monitors();
+	}
 }

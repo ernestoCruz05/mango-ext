@@ -1959,22 +1959,33 @@ int32_t canvas_zoom_resize(const Arg *arg) {
 
 	uint32_t tag = selmon->pertag->curtag;
 	float old_zoom = selmon->pertag->canvas_zoom[tag];
-	selmon->pertag->canvas_zoom[tag] *= factor;
-	selmon->pertag->canvas_zoom[tag] =
-		CLAMP_FLOAT(selmon->pertag->canvas_zoom[tag], 0.1f, 1.0f);
-	float new_zoom = selmon->pertag->canvas_zoom[tag];
+	float new_zoom = CLAMP_FLOAT(old_zoom * factor, 0.1f, 1.0f);
 
-	// Adjust pan so zoom centers on the screen center
+	// Center-pivot pan correction
 	float center_canvas_x =
 		selmon->pertag->canvas_pan_x[tag] + (selmon->w.width / old_zoom) / 2.0f;
-	float center_canvas_y = selmon->pertag->canvas_pan_y[tag] +
-							(selmon->w.height / old_zoom) / 2.0f;
-	selmon->pertag->canvas_pan_x[tag] =
-		center_canvas_x - (selmon->w.width / new_zoom) / 2.0f;
-	selmon->pertag->canvas_pan_y[tag] =
-		center_canvas_y - (selmon->w.height / new_zoom) / 2.0f;
+	float center_canvas_y =
+		selmon->pertag->canvas_pan_y[tag] + (selmon->w.height / old_zoom) / 2.0f;
+	float target_pan_x = center_canvas_x - (selmon->w.width / new_zoom) / 2.0f;
+	float target_pan_y = center_canvas_y - (selmon->w.height / new_zoom) / 2.0f;
 
-	canvas_reposition(selmon);
+	if (!config.animations || config.animation_duration_canvas_zoom <= 1) {
+		selmon->pertag->canvas_zoom[tag] = new_zoom;
+		selmon->pertag->canvas_pan_x[tag] = target_pan_x;
+		selmon->pertag->canvas_pan_y[tag] = target_pan_y;
+		canvas_reposition(selmon);
+	} else {
+		selmon->canvas_pan_anim_active = false;
+		selmon->canvas_zoom_anim_start_zoom = old_zoom;
+		selmon->canvas_zoom_anim_target_zoom = new_zoom;
+		selmon->canvas_zoom_anim_start_pan_x = selmon->pertag->canvas_pan_x[tag];
+		selmon->canvas_zoom_anim_target_pan_x = target_pan_x;
+		selmon->canvas_zoom_anim_start_pan_y = selmon->pertag->canvas_pan_y[tag];
+		selmon->canvas_zoom_anim_target_pan_y = target_pan_y;
+		selmon->canvas_zoom_anim_start_ms = get_now_in_ms();
+		selmon->canvas_zoom_anim_active = true;
+		request_fresh_all_monitors();
+	}
 	return 0;
 }
 
