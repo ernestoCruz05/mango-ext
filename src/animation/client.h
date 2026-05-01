@@ -1416,7 +1416,7 @@ bool client_draw_frame(Client *c) {
 		}
 	}
 
-	if (c->mon &&
+	if ((need_flush || config.animations) && c->mon &&
 		is_canvas_layout(c->mon) && !c->isfullscreen &&
 		!c->ismaximizescreen) {
 		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, NULL);

@@ -561,6 +561,7 @@ struct Monitor {
 	struct wl_list link;
 	struct wlr_output *wlr_output;
 	bool minimap_visible;
+	bool minimap_dirty;
 	bool canvas_overview_visible;
 	bool canvas_overview_closing;	// true while animating out
 	float canvas_overview_progress; // 0.0 = hidden, 1.0 = fully visible

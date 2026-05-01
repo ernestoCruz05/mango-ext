@@ -156,6 +156,7 @@ static void canvas_geom_init(Client *c, Monitor *m, uint32_t tag, float pan_x,
 }
 
 static void canvas_reposition(Monitor *m) {
+	m->minimap_dirty = true;
 	Client *c;
 	uint32_t tag = m->pertag->curtag;
 
