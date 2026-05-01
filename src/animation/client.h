@@ -8,21 +8,28 @@ void set_rect_size(struct wlr_scene_rect *rect, int32_t width, int32_t height) {
 	wlr_scene_rect_set_size(rect, GEZERO(width), GEZERO(height));
 }
 
+static float get_client_effective_zoom(Client *c);
+
 enum corner_location set_client_corner_location(Client *c) {
 	enum corner_location current_corner_location = CORNER_LOCATION_ALL;
 	struct wlr_box target_geom =
 		config.animations ? c->animation.current : c->geom;
+
+	float zoom = get_client_effective_zoom(c);
+	int32_t effective_w = (int32_t)roundf((float)target_geom.width * zoom);
+	int32_t effective_h = (int32_t)roundf((float)target_geom.height * zoom);
+
 	if (target_geom.x + config.border_radius <= c->mon->m.x) {
 		current_corner_location &= ~CORNER_LOCATION_LEFT;
 	}
-	if (target_geom.x + target_geom.width - config.border_radius >=
+	if (target_geom.x + effective_w - config.border_radius >=
 		c->mon->m.x + c->mon->m.width) {
 		current_corner_location &= ~CORNER_LOCATION_RIGHT;
 	}
 	if (target_geom.y + config.border_radius <= c->mon->m.y) {
 		current_corner_location &= ~CORNER_LOCATION_TOP;
 	}
-	if (target_geom.y + target_geom.height - config.border_radius >=
+	if (target_geom.y + effective_h - config.border_radius >=
 		c->mon->m.y + c->mon->m.height) {
 		current_corner_location &= ~CORNER_LOCATION_BOTTOM;
 	}
