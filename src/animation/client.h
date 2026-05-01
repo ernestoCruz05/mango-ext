@@ -282,7 +282,7 @@ static void scene_buffer_apply_canvas_clip(struct wlr_scene_buffer *buffer,
 	wlr_scene_node_set_position(&buffer->node, node_x, node_y);
 
 	if (wlr_xdg_popup_try_from_wlr_surface(ss->surface) == NULL) {
-		wlr_scene_buffer_set_corner_radius(buffer, config.border_radius,
+		wlr_scene_buffer_set_corner_radius(buffer, (int32_t)roundf(config.border_radius * zoom),
 										   cd->corners);
 	}
 }
@@ -581,21 +581,23 @@ void apply_border(Client *c) {
 	}
 
 	struct clipped_region clipped_region = {
-		.area = {inner_surface_x, inner_surface_y, inner_surface_width,
-				 inner_surface_height},
-		.corner_radius = config.border_radius,
+		.area = {(int32_t)roundf(inner_surface_x * zoom),
+				 (int32_t)roundf(inner_surface_y * zoom),
+				 (int32_t)roundf(inner_surface_width * zoom),
+				 (int32_t)roundf(inner_surface_height * zoom)},
+		.corner_radius = (int32_t)roundf(config.border_radius * zoom),
 		.corners = current_corner_location,
 	};
 
-	wlr_scene_node_set_position(&c->scene_surface->node,
-								(int32_t)roundf(c->bw * zoom),
-								(int32_t)roundf(c->bw * zoom));
+	int32_t zoomed_bw = (int32_t)roundf(c->bw * zoom);
+	int32_t zoomed_br = (int32_t)roundf(config.border_radius * zoom);
+	wlr_scene_node_set_position(&c->scene_surface->node, zoomed_bw, zoomed_bw);
 	wlr_scene_rect_set_size(c->border, (int32_t)roundf(rect_width * zoom),
 							(int32_t)roundf(rect_height * zoom));
 	wlr_scene_node_set_position(&c->border->node,
 								(int32_t)roundf(rect_x * zoom),
 								(int32_t)roundf(rect_y * zoom));
-	wlr_scene_rect_set_corner_radius(c->border, config.border_radius,
+	wlr_scene_rect_set_corner_radius(c->border, zoomed_br,
 									 current_corner_location);
 	wlr_scene_rect_set_clipped_region(c->border, clipped_region);
 }
