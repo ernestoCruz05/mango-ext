@@ -374,7 +374,8 @@ void client_draw_shadow(Client *c) {
 
 	int32_t right_offset, bottom_offset, left_offset, top_offset;
 
-	if (c == grabc) {
+	if (c == grabc || (c->mon && is_canvas_layout(c->mon) &&
+						!c->isfullscreen && !c->ismaximizescreen)) {
 		right_offset = 0;
 		bottom_offset = 0;
 		left_offset = 0;
@@ -448,7 +449,8 @@ void apply_border(Client *c) {
 
 	int32_t right_offset, bottom_offset, left_offset, top_offset;
 
-	if (c == grabc) {
+	if (c == grabc || (c->mon && is_canvas_layout(c->mon) &&
+						!c->isfullscreen && !c->ismaximizescreen)) {
 		right_offset = 0;
 		bottom_offset = 0;
 		left_offset = 0;
@@ -611,6 +613,23 @@ void client_apply_clip(Client *c, float factor) {
 		c->animainit_geom = c->current = c->pending = c->animation.current =
 			c->geom;
 
+		if (c->mon && is_canvas_layout(c->mon) && !c->isfullscreen &&
+			!c->ismaximizescreen) {
+			apply_border(c);
+			client_draw_shadow(c);
+			float ez = get_client_effective_zoom(c);
+			int32_t full_w = c->geom.width - 2 * (int32_t)c->bw;
+			int32_t full_h = c->geom.height - 2 * (int32_t)c->bw;
+			wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node,
+											   NULL);
+			buffer_set_effect(
+				c, (BufferData){ez, ez,
+								(int32_t)roundf(full_w * ez),
+								(int32_t)roundf(full_h * ez),
+								current_corner_location, true});
+			return;
+		}
+
 		client_get_clip(c, &clip_box);
 
 		offset = clip_to_hide(c, &clip_box);
@@ -627,13 +646,15 @@ void client_apply_clip(Client *c, float factor) {
 			if (noanim_zoom != 1.0f) {
 				clip_box.x = (int32_t)roundf(clip_box.x * noanim_zoom);
 				clip_box.y = (int32_t)roundf(clip_box.y * noanim_zoom);
-				clip_box.width = (int32_t)roundf(clip_box.width * noanim_zoom);
+				clip_box.width =
+					(int32_t)roundf(clip_box.width * noanim_zoom);
 				clip_box.height =
 					(int32_t)roundf(clip_box.height * noanim_zoom);
 			}
 		}
 
-		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, &clip_box);
+		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node,
+										   &clip_box);
 		buffer_set_effect(c, (BufferData){1.0f, 1.0f, clip_box.width,
 										  clip_box.height,
 										  current_corner_location, true});
@@ -657,6 +678,22 @@ void client_apply_clip(Client *c, float factor) {
 	if (client_is_x11(c)) {
 		clip_box.x = 0;
 		clip_box.y = 0;
+	}
+
+	if (c->mon && is_canvas_layout(c->mon) && !c->isfullscreen &&
+		!c->ismaximizescreen) {
+		apply_border(c);
+		client_draw_shadow(c);
+		float ez = get_client_effective_zoom(c);
+		int32_t full_w = geometry.width;
+		int32_t full_h = geometry.height;
+		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, NULL);
+		buffer_set_effect(
+			c, (BufferData){ez, ez,
+							(int32_t)roundf(full_w * ez),
+							(int32_t)roundf(full_h * ez),
+							current_corner_location, true});
+		return;
 	}
 
 	// 检测窗口是否需要剪切超出屏幕部分，如果需要就调整实际要剪切的矩形
@@ -686,7 +723,8 @@ void client_apply_clip(Client *c, float factor) {
 			clip_box.x = (int32_t)roundf(clip_box.x * clip_zoom);
 			clip_box.y = (int32_t)roundf(clip_box.y * clip_zoom);
 			clip_box.width = (int32_t)roundf(clip_box.width * clip_zoom);
-			clip_box.height = (int32_t)roundf(clip_box.height * clip_zoom);
+			clip_box.height =
+				(int32_t)roundf(clip_box.height * clip_zoom);
 		}
 	}
 
@@ -695,7 +733,8 @@ void client_apply_clip(Client *c, float factor) {
 
 	// 获取剪切后的表面的实际大小用于计算缩放
 	int32_t acutal_surface_width = geometry.width - offset.x - offset.width;
-	int32_t acutal_surface_height = geometry.height - offset.y - offset.height;
+	int32_t acutal_surface_height =
+		geometry.height - offset.y - offset.height;
 
 	if (acutal_surface_width <= 0 || acutal_surface_height <= 0)
 		return;
