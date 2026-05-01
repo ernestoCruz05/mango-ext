@@ -2953,8 +2953,7 @@ void commitnotify(struct wl_listener *listener, void *data) {
 			effective_zoom *= (float)c->canvas_geom[tag].width /
 							  c->canvas_geom_backup[tag].width;
 		}
-		if (effective_zoom != 1.0f)
-			apply_visual_zoom(c, effective_zoom);
+		apply_visual_zoom(c, effective_zoom);
 	}
 
 	if (c == grabc || !c->dirty)
@@ -8082,8 +8081,7 @@ void commitx11(struct wl_listener *listener, void *data) {
 			effective_zoom *= (float)c->canvas_geom[tag].width /
 							  c->canvas_geom_backup[tag].width;
 		}
-		if (effective_zoom != 1.0f)
-			apply_visual_zoom(c, effective_zoom);
+		apply_visual_zoom(c, effective_zoom);
 	}
 
 	if ((int32_t)c->geom.width - 2 * (int32_t)c->bw == (int32_t)state->width &&
