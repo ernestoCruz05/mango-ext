@@ -12,6 +12,13 @@ Mango-exts `canvas` layout is similar to window managers like hevel. It lets you
 |`canvas_tiling_gap`|int| determines the size of window gaps when using canvas_tiling|
 |`canvas_pan_on_kill`|bool| wether or not to pan to another window when the current window is killed|
 |`canvas_anchor_animate`|bool| when set to 1, smoothly animates the pan when jumping to an anchor point. Default: 0 (instant teleport)|
+|`tag_carousel`|bool| when set to 1, tag switching wraps around carousel-style (last tag loops back to first). Default: 0 |
+
+#### Window rules
+
+|rule|Description|
+|:---|:---|
+|`canvas_notile:1`| exclude matching windows from canvas tiling. Add as a windowrule parameter. |
 
 #### canvas_tiling options
 
@@ -28,9 +35,10 @@ Mango-exts `canvas` layout is similar to window managers like hevel. It lets you
 
 |dispatcher|Description|
 |:--- |:---|
-|`canvas-overview-toggle`| toggles the canvas layouts' overview feature. This lets you see all of your windows at once and quickly reposition your view.|
+|`canvas_overview_toggle`| toggles the canvas layouts' overview feature. This lets you see all of your windows at once and quickly reposition your view.|
 |`toggleminimap`| toggles the minimap, which displays all of your windows along with a visual indicator of your current view.|
-|`canvas_zoom_resize,<arg>`| zooms in/out, direction and strength are determined by <arg>|
+|`canvas_zoom_resize,<arg>`| zooms in/out. `<arg>` is a multiplier: values > 1.0 zoom in, values < 1.0 zoom out (e.g. `1.4` to zoom in, `0.6` to zoom out).|
+|`canvas_pan,<dx>,<dy>`| pans the viewport by `<dx>,<dy>` pixels in canvas coordinates. Use `axisbind` for directional panning with keyboard.|
 |`canvas_fill_viewport`| resizes the currently focused window to make it fill up the entire current viewport|
 |`canvas_centerview`| moves the viewport to center the currently focused window|
 |`canvas_drag_pan`| enters canvas drag-pan mode (use with `mousebind` to bind to a mouse button)|
@@ -76,8 +84,41 @@ Set anchors appear as color-coded dots on the minimap (red, orange, yellow, gree
 
 > **Note:** Anchors are stored in memory only and reset when the compositor restarts. Zoom is not affected by anchors — only the pan position is saved and restored.
 
+### Recommended keybind setup
+
+```ini
+# Canvas navigation
+mousebind = ALT, BTN_MIDDLE, canvas_drag_pan
+bind = SUPER, SPACE, canvas_centerview
+bind = SUPER, i, canvas_fill_viewport
+bind = SUPER, o, toggleminimap
+bind = SUPER, p, canvas_overview_toggle
+
+# Zoom (via axisbind for smooth scrolling)
+axisbind = SUPER, UP, canvas_zoom_resize, 1.4
+axisbind = SUPER, DOWN, canvas_zoom_resize, 0.6
+
+# Tiling
+canvas_tiling = 5
+canvas_tiling_gap = 5
+canvas_pan_on_kill = 1
+```
+
+### Touch & touchpad gestures
+
+Canvas supports touch and touchpad gestures out of the box:
+
+|gesture|action|
+|:---|:---|
+|3-finger drag| pan the viewport |
+|2-finger pinch| zoom in/out |
+
+These are always active on canvas layouts and do not require additional config.
+
 
 ## Dwindle
 
-The `dwindle` layout as known from WMs like bspwm and hyprland.Creating new windows splits the currently focused window either horizontally or vertically depending on its proportions.
+The `dwindle` layout as known from WMs like bspwm and Hyprland. Windows are arranged in a binary tree: creating a new window splits the currently focused window either horizontally or vertically, alternating based on the window's proportions (wider windows split vertically, taller windows split horizontally).
+
+Closing a window removes its leaf from the tree and the sibling takes over the freed space. Swapping windows exchanges their positions in the tree while preserving the split structure.
 

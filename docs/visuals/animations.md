@@ -64,6 +64,8 @@ Control the speed of animations (in milliseconds).
 | `animation_duration_tag` | integer | `300` | Tag animation duration (ms) |
 | `animation_duration_close` | integer | `300` | Close animation duration (ms) |
 | `animation_duration_focus` | integer | `0` | Focus change (opacity transition) animation duration (ms) |
+| `animation_duration_canvas_pan` | integer | `300` | Canvas pan animation duration (ms) |
+| `animation_duration_canvas_zoom` | integer | `300` | Canvas zoom animation duration (ms) |
 
 ```ini
 animation_duration_move=500
@@ -88,6 +90,8 @@ You can visualize and generate curve values using online tools like [cssportal.c
 | `animation_curve_focus` | string | `0.46,1.0,0.29,0.99` | Focus change (opacity transition) animation bezier curve |
 | `animation_curve_opafadein` | string | `0.46,1.0,0.29,0.99` | Open opacity animation bezier curve |
 | `animation_curve_opafadeout` | string | `0.5,0.5,0.5,0.5` | Close opacity animation bezier curve |
+| `animation_curve_canvas_pan` | string | `0.46,1.0,0.29,0.99` | Canvas pan animation bezier curve |
+| `animation_curve_canvas_zoom` | string | `0.46,1.0,0.29,0.99` | Canvas zoom animation bezier curve |
 
 ```ini
 animation_curve_open=0.46,1.0,0.29,0.99
