@@ -27,6 +27,68 @@ This project's development is based on [dwl](https://codeberg.org/dwl/dwl/).
 
 https://github.com/user-attachments/assets/bb83004a-0563-4b48-ad89-6461a9b78b1f
 
+# Extended configuration
+Small placeholder for the config values
+```conf
+#canvas stuff
+bind=SUPER,o,toggleminimap,
+bind=SUPER,p,canvas_overview_toggle,
+bind=SUPER,z,canvas_zoom_resize,0.7
+bind=SUPER,x,canvas_zoom_resize,1.3
+bind=SUPER,u,canvas_fill_viewport,
+bind=SUPER,c,canvas_centerview,
+
+#dir: 1=left, 2=right, 3=up, 4=down, 5=smart (closest edge to mouse)
+canvas_tiling = 0;
+canvas_tiling_gap = 10;
+canvas_pan_on_kill = 1; 0 for no panning after kill
+
+canvas_notile:1 windowrule parameter if you want a specific type of window to not tile on canvas
+
+#dwindle layout options
+# Where new windows spawn relative to the focused window on a vertical split.
+# 0 = follow the cursor position, 1 = always below, 2 = always above.
+dwindle_vsplit = 0
+
+# Where new windows spawn relative to the focused window on a horizontal split.
+# 0 = follow the cursor position, 1 = always right, 2 = always left.
+dwindle_hsplit = 0
+
+# When enabled, a container's split axis (horizontal/vertical) is locked once
+# set and will not be recalculated if windows are added or removed from it.
+dwindle_preserve_split = 0
+
+# Divides the focused window into four triangles along its diagonals. The
+# triangle the cursor is in decides both the split axis and which side the
+# new window appears on. Enabling this also locks split directions (implies
+# dwindle_preserve_split behaviour).
+dwindle_smart_split = 0
+
+# When dragging to resize, the split boundary moves in the same direction as
+# the cursor regardless of which side of the split the window is on.
+# Without this, direction is always relative to the tiling tree order.
+dwindle_smart_resize = 0
+
+# Initial size ratio assigned to the first child of each new split.
+# 0.5 means an equal split; values closer to 0 or 1 give one side more space.
+dwindle_split_ratio = 0.5
+
+#touchscreen related stuff
+touch_distance_threshold = 100
+touch_degrees_leniency = 30
+touch_timeoutms = 1000
+touch_edge_size_left = 50
+touch_edge_size_top = 50
+touch_edge_size_right = 50
+touch_edge_size_bottom = 50
+
+# For a carousel-like behaviour when swapping tags
+tag_carousel=1
+```
+Default keybinds:
+- SUPER + M3 for pan
+- 3 fingers for span (touchscreen/touchpad)
+- 2 fingers pinch motioon for zoom in/zoom out (touchscreen/touchpad)
 # Mango's Vision
 
 **Mango's primary goal is stability**: After months of testing and development—and aside from a few lingering GPU compatibility issues—it should now be stable enough. I don't plan on making many breaking changes.
