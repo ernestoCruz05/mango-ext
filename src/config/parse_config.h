@@ -296,6 +296,7 @@ typedef struct {
 	int32_t canvas_pan_on_kill;
 	int32_t canvas_anchor_animate;
 	int32_t tag_carousel;
+	int32_t max_tags;
 	float scratchpad_width_ratio;
 	float scratchpad_height_ratio;
 	float rootcolor[4];
@@ -1224,7 +1225,7 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 
 			while (token != NULL) {
 				int32_t num = atoi(token);
-				if (num > 0 && num <= LENGTH(tags)) {
+				if (num > 0 && num <= effective_tags) {
 					mask |= (1 << (num - 1));
 				}
 				token = strtok_r(NULL, "|", &saveptr);
@@ -1797,6 +1798,8 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->canvas_anchor_animate = atoi(value);
 	} else if (strcmp(key, "tag_carousel") == 0) {
 		config->tag_carousel = atoi(value);
+	} else if (strcmp(key, "max_tags") == 0) {
+		config->max_tags = atoi(value);
 	} else if (strcmp(key, "rootcolor") == 0) {
 		int64_t color = parse_color(value);
 		if (color == -1) {
@@ -3349,6 +3352,7 @@ void override_config(void) {
 	config.scratchpad_cross_monitor =
 		CLAMP_INT(config.scratchpad_cross_monitor, 0, 1);
 	config.focus_cross_tag = CLAMP_INT(config.focus_cross_tag, 0, 1);
+	config.max_tags = CLAMP_INT(config.max_tags, 2, LENGTH(tags));
 	config.view_current_to_back = CLAMP_INT(config.view_current_to_back, 0, 1);
 	config.enable_floating_snap = CLAMP_INT(config.enable_floating_snap, 0, 1);
 	config.snap_distance = CLAMP_INT(config.snap_distance, 0, 99999);
@@ -3495,6 +3499,7 @@ void set_value_default() {
 	config.canvas_pan_on_kill = 1;
 	config.canvas_anchor_animate = 0;
 	config.tag_carousel = 0;
+	config.max_tags = LENGTH(tags);
 	config.overviewgappi = 5;
 	config.overviewgappo = 30;
 	config.cursor_hide_timeout = 0;
@@ -3690,6 +3695,8 @@ bool parse_config(void) {
 	parse_correct = parse_config_file(&config, filename, true);
 	set_default_key_bindings(&config);
 	override_config();
+	effective_tags = config.max_tags;
+	effective_tagmask = (1 << effective_tags) - 1;
 	return parse_correct;
 }
 
@@ -3911,9 +3918,9 @@ void parse_tagrule(Monitor *m) {
 		}
 	}
 
-	for (i = 1; i <= LENGTH(tags); i++) {
+	for (i = 1; i <= effective_tags; i++) {
 		wl_list_for_each(c, &clients, link) {
-			if ((c->tags & (1 << (i - 1)) & TAGMASK) && ISTILED(c)) {
+			if ((c->tags & (1 << (i - 1)) & effective_tagmask) && ISTILED(c)) {
 				if (m->pertag->mfacts[i] > 0.0f)
 					c->master_mfact_per = m->pertag->mfacts[i];
 			}

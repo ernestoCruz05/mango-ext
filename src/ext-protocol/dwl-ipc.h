@@ -55,7 +55,7 @@ void dwl_ipc_manager_bind(struct wl_client *client, void *data,
 								   &dwl_manager_implementation, NULL,
 								   dwl_ipc_manager_destroy);
 
-	zdwl_ipc_manager_v2_send_tags(manager_resource, LENGTH(tags));
+	zdwl_ipc_manager_v2_send_tags(manager_resource, effective_tags);
 
 	for (uint32_t i = 0; i < LENGTH(layouts); i++)
 		zdwl_ipc_manager_v2_send_layout(manager_resource, layouts[i].symbol);
@@ -118,7 +118,7 @@ void dwl_ipc_output_printstatus_to(DwlIpcOutput *ipc_output) {
 	focused = focustop(monitor);
 	zdwl_ipc_output_v2_send_active(ipc_output->resource, monitor == selmon);
 
-	for (tag = 0; tag < LENGTH(tags); tag++) {
+	for (tag = 0; tag < effective_tags; tag++) {
 		numclients = state = focused_client = 0;
 		tagmask = 1 << tag;
 		if ((tagmask & monitor->tagset[monitor->seltags]) != 0)
@@ -266,7 +266,7 @@ void dwl_ipc_output_set_tags(struct wl_client *client,
 							 uint32_t toggle_tagset) {
 	DwlIpcOutput *ipc_output;
 	Monitor *monitor = NULL;
-	uint32_t newtags = tagmask & TAGMASK;
+	uint32_t newtags = tagmask & effective_tagmask;
 
 	ipc_output = wl_resource_get_user_data(resource);
 	if (!ipc_output)

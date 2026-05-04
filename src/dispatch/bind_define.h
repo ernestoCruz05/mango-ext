@@ -4,7 +4,7 @@ int32_t bind_to_view(const Arg *arg) {
 	uint32_t target = arg->ui;
 
 	if (config.view_current_to_back && selmon->pertag->curtag &&
-		(target & TAGMASK) == (selmon->tagset[selmon->seltags])) {
+		(target & effective_tagmask) == (selmon->tagset[selmon->seltags])) {
 		if (selmon->pertag->prevtag)
 			target = 1 << (selmon->pertag->prevtag - 1);
 		else
@@ -12,7 +12,7 @@ int32_t bind_to_view(const Arg *arg) {
 	}
 
 	if (!config.view_current_to_back &&
-		(target & TAGMASK) == (selmon->tagset[selmon->seltags])) {
+		(target & effective_tagmask) == (selmon->tagset[selmon->seltags])) {
 		return 0;
 	}
 
@@ -24,7 +24,7 @@ int32_t bind_to_view(const Arg *arg) {
 	}
 
 	if (target == 0 || (int32_t)target == INT_MIN) {
-		view(&(Arg){.ui = ~0 & TAGMASK, .i = arg->i}, false);
+		view(&(Arg){.ui = ~0 & effective_tagmask, .i = arg->i}, false);
 	} else {
 		view(&(Arg){.ui = target, .i = arg->i}, true);
 	}
@@ -1222,7 +1222,7 @@ int32_t tagsilent(const Arg *arg) {
 		return 0;
 
 	target_client = selmon->sel;
-	target_client->tags = arg->ui & TAGMASK;
+	target_client->tags = arg->ui & effective_tagmask;
 	wl_list_for_each(fc, &clients, link) {
 		if (fc && fc != target_client && target_client->tags & fc->tags &&
 			ISFULLSCREEN(fc) && !target_client->isfloating) {
@@ -1240,7 +1240,7 @@ int32_t tagtoleft(const Arg *arg) {
 		return 0;
 
 	if (selmon->sel != NULL &&
-		__builtin_popcount(selmon->tagset[selmon->seltags] & TAGMASK) == 1 &&
+		__builtin_popcount(selmon->tagset[selmon->seltags] & effective_tagmask) == 1 &&
 		selmon->tagset[selmon->seltags] > 1) {
 		tag(&(Arg){.ui = selmon->tagset[selmon->seltags] >> 1, .i = arg->i});
 	}
@@ -1252,8 +1252,8 @@ int32_t tagtoright(const Arg *arg) {
 		return 0;
 
 	if (selmon->sel != NULL &&
-		__builtin_popcount(selmon->tagset[selmon->seltags] & TAGMASK) == 1 &&
-		selmon->tagset[selmon->seltags] & (TAGMASK >> 1)) {
+		__builtin_popcount(selmon->tagset[selmon->seltags] & effective_tagmask) == 1 &&
+		selmon->tagset[selmon->seltags] & (effective_tagmask >> 1)) {
 		tag(&(Arg){.ui = selmon->tagset[selmon->seltags] << 1, .i = arg->i});
 	}
 	return 0;
@@ -1452,12 +1452,12 @@ int32_t toggletag(const Arg *arg) {
 	if (!sel)
 		return 0;
 
-	if ((int32_t)arg->ui == INT_MIN && sel->tags != (~0 & TAGMASK)) {
-		newtags = ~0 & TAGMASK;
-	} else if ((int32_t)arg->ui == INT_MIN && sel->tags == (~0 & TAGMASK)) {
+	if ((int32_t)arg->ui == INT_MIN && sel->tags != (~0 & effective_tagmask)) {
+		newtags = ~0 & effective_tagmask;
+	} else if ((int32_t)arg->ui == INT_MIN && sel->tags == (~0 & effective_tagmask)) {
 		newtags = 1 << (sel->mon->pertag->curtag - 1);
 	} else {
-		newtags = sel->tags ^ (arg->ui & TAGMASK);
+		newtags = sel->tags ^ (arg->ui & effective_tagmask);
 	}
 
 	if (newtags) {
@@ -1477,9 +1477,9 @@ int32_t toggleview(const Arg *arg) {
 	uint32_t target;
 	Client *c = NULL;
 
-	target = arg->ui == 0 ? ~0 & TAGMASK : arg->ui;
+	target = arg->ui == 0 ? ~0 & effective_tagmask : arg->ui;
 
-	newtagset = selmon->tagset[selmon->seltags] ^ (target & TAGMASK);
+	newtagset = selmon->tagset[selmon->seltags] ^ (target & effective_tagmask);
 
 	if (newtagset) {
 		selmon->tagset[selmon->seltags] = newtagset;
@@ -1510,14 +1510,14 @@ int32_t viewtoleft(const Arg *arg) {
 	if (target == 0) {
 		if (!config.tag_carousel)
 			return 0;
-		target = (1 << (LENGTH(tags) - 1)) & TAGMASK;
+		target = (1 << (effective_tags - 1)) & effective_tagmask;
 		selmon->carousel_anim_dir = -1;
 	}
 
 	if (!selmon || (target) == selmon->tagset[selmon->seltags])
 		return 0;
 
-	view(&(Arg){.ui = target & TAGMASK, .i = arg->i}, true);
+	view(&(Arg){.ui = target & effective_tagmask, .i = arg->i}, true);
 	selmon->carousel_anim_dir = 0;
 	return 0;
 }
@@ -1532,16 +1532,17 @@ int32_t viewtoright(const Arg *arg) {
 	uint32_t target = selmon->tagset[selmon->seltags];
 	target <<= 1;
 
-	if (!selmon || (target) == selmon->tagset[selmon->seltags])
-		return 0;
-	if (!(target & TAGMASK)) {
+	if (!(target & effective_tagmask)) {
 		if (!config.tag_carousel)
 			return 0;
 		target = 1;
 		selmon->carousel_anim_dir = 1;
 	}
 
-	view(&(Arg){.ui = target & TAGMASK, .i = arg->i}, true);
+	if (target == selmon->tagset[selmon->seltags])
+		return 0;
+
+	view(&(Arg){.ui = target & effective_tagmask, .i = arg->i}, true);
 	selmon->carousel_anim_dir = 0;
 	return 0;
 }
@@ -1570,7 +1571,7 @@ int32_t viewtoleft_have_client(const Arg *arg) {
 
 	bool wrapped = false;
 	if (!found && config.tag_carousel) {
-		for (n = LENGTH(tags); n > current; n--) {
+		for (n = effective_tags; n > current; n--) {
 			if (get_tag_status(n, selmon)) {
 				found = true;
 				wrapped = true;
@@ -1582,7 +1583,7 @@ int32_t viewtoleft_have_client(const Arg *arg) {
 	if (found) {
 		if (wrapped)
 			selmon->carousel_anim_dir = -1;
-		view(&(Arg){.ui = (1 << (n - 1)) & TAGMASK, .i = arg->i}, true);
+		view(&(Arg){.ui = (1 << (n - 1)) & effective_tagmask, .i = arg->i}, true);
 		selmon->carousel_anim_dir = 0;
 	}
 	return 0;
@@ -1603,7 +1604,7 @@ int32_t viewtoright_have_client(const Arg *arg) {
 	if (current >= LENGTH(tags))
 		return 0;
 
-	for (n = current + 1; n <= LENGTH(tags); n++) {
+	for (n = current + 1; n <= effective_tags; n++) {
 		if (get_tag_status(n, selmon)) {
 			found = true;
 			break;
@@ -1624,7 +1625,7 @@ int32_t viewtoright_have_client(const Arg *arg) {
 	if (found) {
 		if (wrapped)
 			selmon->carousel_anim_dir = 1;
-		view(&(Arg){.ui = (1 << (n - 1)) & TAGMASK, .i = arg->i}, true);
+		view(&(Arg){.ui = (1 << (n - 1)) & effective_tagmask, .i = arg->i}, true);
 		selmon->carousel_anim_dir = 0;
 	}
 	return 0;
@@ -1653,7 +1654,7 @@ int32_t tagcrossmon(const Arg *arg) {
 }
 
 int32_t comboview(const Arg *arg) {
-	uint32_t newtags = arg->ui & TAGMASK;
+	uint32_t newtags = arg->ui & effective_tagmask;
 
 	if (!newtags || !selmon)
 		return 0;
@@ -1725,7 +1726,7 @@ int32_t minimized(const Arg *arg) {
 }
 
 void fix_mon_tagset_from_overview(Monitor *m) {
-	if (m->tagset[m->seltags] == (m->ovbk_prev_tagset & TAGMASK)) {
+	if (m->tagset[m->seltags] == (m->ovbk_prev_tagset & effective_tagmask)) {
 		m->tagset[m->seltags ^ 1] = m->ovbk_current_tagset;
 		m->pertag->prevtag = get_tags_first_tag_num(m->ovbk_current_tagset);
 	} else {
@@ -1760,7 +1761,7 @@ int32_t toggleoverview(const Arg *arg) {
 		if (visible_client_number > 0) {
 			selmon->ovbk_current_tagset = selmon->tagset[selmon->seltags];
 			selmon->ovbk_prev_tagset = selmon->tagset[selmon->seltags ^ 1];
-			target = ~0 & TAGMASK;
+			target = ~0 & effective_tagmask;
 		} else {
 			selmon->isoverview ^= 1;
 			return 0;

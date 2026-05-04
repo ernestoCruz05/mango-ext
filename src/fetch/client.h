@@ -530,7 +530,7 @@ float *get_border_color(Client *c) {
 int32_t is_single_bit_set(uint32_t x) { return x && !(x & (x - 1)); }
 
 bool client_only_in_one_tag(Client *c) {
-	uint32_t masked = c->tags & TAGMASK;
+	uint32_t masked = c->tags & effective_tagmask;
 	if (is_single_bit_set(masked)) {
 		return true;
 	} else {
