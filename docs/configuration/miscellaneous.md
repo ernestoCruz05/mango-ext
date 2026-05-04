@@ -35,6 +35,7 @@ description: Advanced settings for XWayland, focus behavior, and system integrat
 | `exchange_cross_monitor` | `0` | Allow exchanging clients across monitor boundaries. |
 | `focus_cross_tag` | `0` | Allow directional focus to cross into other tags. |
 | `view_current_to_back` | `0` | Toggling the current tag switches back to the previously viewed tag. |
+| `max_tags` | `9` | Limit how many tags are active (2–9). Tags beyond this are unreachable. |
 | `scratchpad_cross_monitor` | `0` | Share the scratchpad pool across all monitors. |
 | `single_scratchpad` | `1` | Only allow one scratchpad (named or standard) to be visible at a time. |
 | `circle_layout` | - | A comma-separated list of layouts `switch_layout` cycles through,the value sample:`tile,scroller`. |
