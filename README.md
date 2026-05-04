@@ -45,7 +45,33 @@ canvas_pan_on_kill = 1; 0 for no panning after kill
 
 canvas_notile:1 windowrule parameter if you want a specific type of window to not tile on canvas
 
-#i still have to add configurable dwindle stuff like use_active_window or split multipliers
+#dwindle layout options
+# Where new windows spawn relative to the focused window on a vertical split.
+# 0 = follow the cursor position, 1 = always below, 2 = always above.
+dwindle_vsplit = 0
+
+# Where new windows spawn relative to the focused window on a horizontal split.
+# 0 = follow the cursor position, 1 = always right, 2 = always left.
+dwindle_hsplit = 0
+
+# When enabled, a container's split axis (horizontal/vertical) is locked once
+# set and will not be recalculated if windows are added or removed from it.
+dwindle_preserve_split = 0
+
+# Divides the focused window into four triangles along its diagonals. The
+# triangle the cursor is in decides both the split axis and which side the
+# new window appears on. Enabling this also locks split directions (implies
+# dwindle_preserve_split behaviour).
+dwindle_smart_split = 0
+
+# When dragging to resize, the split boundary moves in the same direction as
+# the cursor regardless of which side of the split the window is on.
+# Without this, direction is always relative to the tiling tree order.
+dwindle_smart_resize = 0
+
+# Initial size ratio assigned to the first child of each new split.
+# 0.5 means an equal split; values closer to 0 or 1 give one side more space.
+dwindle_split_ratio = 0.5
 
 #touchscreen related stuff
 touch_distance_threshold = 100
