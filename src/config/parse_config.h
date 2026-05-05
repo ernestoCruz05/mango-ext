@@ -285,24 +285,19 @@ typedef struct {
 	int32_t repeat_delay;
 	uint32_t numlockon;
 
-	/* Trackpad */
-	int32_t disable_trackpad;
-	int32_t tap_to_click;
-	int32_t tap_and_drag;
-	int32_t drag_lock;
-	int32_t mouse_natural_scrolling;
-	int32_t trackpad_natural_scrolling;
+	/* common pointer */
 	int32_t disable_while_typing;
 	int32_t left_handed;
 	int32_t middle_button_emulation;
-	uint32_t accel_profile;
-	double accel_speed;
 	uint32_t scroll_method;
 	uint32_t scroll_button;
 	uint32_t click_method;
 	uint32_t send_events_mode;
-	uint32_t button_map;
 
+	/* mouse */
+	int32_t mouse_natural_scrolling;
+	uint32_t mouse_accel_profile;
+	double mouse_accel_speed;
 	double axis_scroll_factor;
 
 	char *tablet_map_to_mon;
@@ -314,6 +309,19 @@ typedef struct {
 	double touch_edge_size_top;
 	double touch_edge_size_right;
 	double touch_edge_size_bottom;
+
+	/* Trackpad */
+	int32_t trackpad_natural_scrolling;
+	uint32_t trackpad_accel_profile;
+	double trackpad_accel_speed;
+	double trackpad_scroll_factor;
+	int32_t disable_trackpad;
+	int32_t tap_to_click;
+	int32_t tap_and_drag;
+	int32_t drag_lock;
+	uint32_t button_map;
+
+	/* window effects */
 	int32_t blur;
 	int32_t blur_layer;
 	int32_t blur_optimized;
@@ -329,6 +337,7 @@ typedef struct {
 	int32_t shadows_position_y;
 	float shadowscolor[4];
 
+	/* appearance */
 	int32_t smartgaps;
 	uint32_t gappih;
 	uint32_t gappiv;
@@ -1847,10 +1856,14 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->left_handed = atoi(value);
 	} else if (strcmp(key, "middle_button_emulation") == 0) {
 		config->middle_button_emulation = atoi(value);
-	} else if (strcmp(key, "accel_profile") == 0) {
-		config->accel_profile = atoi(value);
-	} else if (strcmp(key, "accel_speed") == 0) {
-		config->accel_speed = atof(value);
+	} else if (strcmp(key, "mouse_accel_profile") == 0) {
+		config->mouse_accel_profile = atoi(value);
+	} else if (strcmp(key, "mouse_accel_speed") == 0) {
+		config->mouse_accel_speed = atof(value);
+	} else if (strcmp(key, "trackpad_accel_profile") == 0) {
+		config->trackpad_accel_profile = atoi(value);
+	} else if (strcmp(key, "trackpad_accel_speed") == 0) {
+		config->trackpad_accel_speed = atof(value);
 	} else if (strcmp(key, "scroll_method") == 0) {
 		config->scroll_method = atoi(value);
 	} else if (strcmp(key, "scroll_button") == 0) {
@@ -1881,6 +1894,8 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->touch_edge_size_right = atof(value);
 	} else if (strcmp(key, "touch_edge_size_bottom") == 0) {
 		config->touch_edge_size_bottom = atof(value);
+	} else if (strcmp(key, "trackpad_scroll_factor") == 0) {
+		config->trackpad_scroll_factor = atof(value);
 	} else if (strcmp(key, "gappih") == 0) {
 		config->gappih = atoi(value);
 	} else if (strcmp(key, "gappiv") == 0) {
@@ -3558,8 +3573,13 @@ void override_config(void) {
 	config.swipe_min_threshold = CLAMP_INT(config.swipe_min_threshold, 1, 1000);
 	config.mouse_natural_scrolling =
 		CLAMP_INT(config.mouse_natural_scrolling, 0, 1);
-	config.accel_profile = CLAMP_INT(config.accel_profile, 0, 2);
-	config.accel_speed = CLAMP_FLOAT(config.accel_speed, -1.0f, 1.0f);
+	config.mouse_accel_profile = CLAMP_INT(config.mouse_accel_profile, 0, 2);
+	config.mouse_accel_speed =
+		CLAMP_FLOAT(config.mouse_accel_speed, -1.0f, 1.0f);
+	config.trackpad_accel_profile =
+		CLAMP_INT(config.trackpad_accel_profile, 0, 2);
+	config.trackpad_accel_speed =
+		CLAMP_FLOAT(config.trackpad_accel_speed, -1.0f, 1.0f);
 	config.scroll_method = CLAMP_INT(config.scroll_method, 0, 4);
 	config.scroll_button = CLAMP_INT(config.scroll_button, 272, 279);
 	config.click_method = CLAMP_INT(config.click_method, 0, 2);
@@ -3580,6 +3600,8 @@ void override_config(void) {
 		CLAMP_FLOAT(config.touch_edge_size_right, 1.0f, 10000.0f);
 	config.touch_edge_size_bottom =
 		CLAMP_FLOAT(config.touch_edge_size_bottom, 1.0f, 10000.0f);
+	config.trackpad_scroll_factor =
+		CLAMP_FLOAT(config.trackpad_scroll_factor, 0.1f, 10.0f);
 	config.gappih = CLAMP_INT(config.gappih, 0, 1000);
 	config.gappiv = CLAMP_INT(config.gappiv, 0, 1000);
 	config.gappoh = CLAMP_INT(config.gappoh, 0, 1000);
@@ -3688,6 +3710,7 @@ void set_value_default() {
 	config.touch_edge_size_top = 50.0;
 	config.touch_edge_size_right = 50.0;
 	config.touch_edge_size_bottom = 50.0;
+	config.trackpad_scroll_factor = 1.0;
 	config.view_current_to_back = 0;
 	config.single_scratchpad = 1;
 	config.xwayland_persistence = 1;
@@ -3734,8 +3757,10 @@ void set_value_default() {
 	config.disable_while_typing = 1;
 	config.left_handed = 0;
 	config.middle_button_emulation = 0;
-	config.accel_profile = LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE;
-	config.accel_speed = 0.0;
+	config.mouse_accel_profile = LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE;
+	config.mouse_accel_speed = 0.0;
+	config.trackpad_accel_profile = LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE;
+	config.trackpad_accel_speed = 0.0;
 	config.scroll_method = LIBINPUT_CONFIG_SCROLL_2FG;
 	config.scroll_button = 274;
 	config.click_method = LIBINPUT_CONFIG_CLICK_METHOD_BUTTON_AREAS;
