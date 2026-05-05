@@ -1225,7 +1225,7 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 
 			while (token != NULL) {
 				int32_t num = atoi(token);
-				if (num > 0 && num <= effective_tags) {
+				if (num > 0 && num <= LENGTH(tags)) {
 					mask |= (1 << (num - 1));
 				}
 				token = strtok_r(NULL, "|", &saveptr);
