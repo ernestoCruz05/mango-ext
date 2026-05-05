@@ -2,6 +2,7 @@ typedef struct DwindleNode DwindleNode;
 struct DwindleNode {
 	bool is_split;
 	bool split_h;
+	bool split_locked;
 	float ratio;
 	float drag_init_ratio;
 	int32_t container_x;
@@ -101,8 +102,12 @@ static void dwindle_remove(DwindleNode **root, Client *c) {
 		(parent->first == leaf) ? parent->second : parent->first;
 	DwindleNode *grandparent = parent->parent;
 	sibling->parent = grandparent;
-	sibling->container_w = 0;
-	sibling->container_h = 0;
+
+	/* Preserve split direction on sibling split-nodes when requested. */
+	if (!sibling->is_split || (!config.dwindle_preserve_split && !config.dwindle_smart_split)) {
+		sibling->container_w = 0;
+		sibling->container_h = 0;
+	}
 
 	if (!grandparent) {
 		*root = sibling;
@@ -131,7 +136,7 @@ static void dwindle_assign(DwindleNode *node, int32_t ax, int32_t ay,
 		return;
 	}
 
-	if (node->container_w == 0 && node->container_h == 0)
+	if (!node->split_locked && node->container_w == 0 && node->container_h == 0)
 		node->split_h = (aw >= ah);
 	node->container_x = ax;
 	node->container_y = ay;
@@ -203,6 +208,14 @@ static void dwindle_resize_client(Monitor *m, Client *c, int32_t dx,
 	if (dwindle_locked_h_node) {
 		float cw = (float)MAX(1, dwindle_locked_h_node->container_w);
 		float ox = (float)(cursor->x - drag_begin_cursorx);
+		if (config.dwindle_smart_resize) {
+			/* Move the boundary toward the cursor: invert direction when
+			 * the drag started on the right side of the split line. */
+			float split_x = dwindle_locked_h_node->container_x +
+			                cw * dwindle_locked_h_node->drag_init_ratio;
+			if (drag_begin_cursorx >= split_x)
+				ox = -ox;
+		}
 		dwindle_locked_h_node->ratio =
 			dwindle_locked_h_node->drag_init_ratio + ox / cw;
 		dwindle_locked_h_node->ratio =
@@ -212,6 +225,13 @@ static void dwindle_resize_client(Monitor *m, Client *c, int32_t dx,
 	if (dwindle_locked_v_node) {
 		float ch = (float)MAX(1, dwindle_locked_v_node->container_h);
 		float oy = (float)(cursor->y - drag_begin_cursory);
+		if (config.dwindle_smart_resize) {
+			/* Same logic for the vertical split line. */
+			float split_y = dwindle_locked_v_node->container_y +
+			                ch * dwindle_locked_v_node->drag_init_ratio;
+			if (drag_begin_cursory >= split_y)
+				oy = -oy;
+		}
 		dwindle_locked_v_node->ratio =
 			dwindle_locked_v_node->drag_init_ratio + oy / ch;
 		dwindle_locked_v_node->ratio =
@@ -320,6 +340,58 @@ static void dwindle_remove_client(Client *c) {
 	}
 }
 
+/* Insert a new client respecting dwindle_vsplit, dwindle_hsplit, and
+ * dwindle_smart_split config options. */
+static void dwindle_insert_with_config(DwindleNode **root, Client *new_c,
+                                       Client *focused, float ratio) {
+	bool as_first = false;
+
+	if (focused) {
+		struct wlr_box *fg = &focused->geom;
+		double fcx = fg->x + fg->width  * 0.5;
+		double fcy = fg->y + fg->height * 0.5;
+
+		if (config.dwindle_smart_split) {
+			/* Divide the focused window into 4 triangles using its diagonals.
+			 * The triangle the cursor falls in determines both the split axis
+			 * and which side the new window appears on. */
+			double nx = (cursor->x - fcx) / (fg->width  * 0.5);
+			double ny = (cursor->y - fcy) / (fg->height * 0.5);
+			bool do_split_h;
+			if (fabs(ny) > fabs(nx)) {
+				do_split_h = false;
+				as_first   = (ny < 0); /* top triangle → new window on top */
+			} else {
+				do_split_h = true;
+				as_first   = (nx < 0); /* left triangle → new window on left */
+			}
+			dwindle_insert(root, new_c, focused, ratio, as_first);
+			DwindleNode *leaf = dwindle_find_leaf(*root, new_c);
+			if (leaf && leaf->parent) {
+				leaf->parent->split_h     = do_split_h;
+				leaf->parent->split_locked = true;
+			}
+			return;
+		}
+
+		/* Predict likely split direction from the focused window's shape. */
+		bool likely_h = (fg->width >= fg->height);
+		if (likely_h) {
+			if (config.dwindle_hsplit == 0)
+				as_first = (cursor->x < fcx); /* follow mouse */
+			else
+				as_first = (config.dwindle_hsplit == 2); /* 2=left, 1=right */
+		} else {
+			if (config.dwindle_vsplit == 0)
+				as_first = (cursor->y < fcy); /* follow mouse */
+			else
+				as_first = (config.dwindle_vsplit == 2); /* 2=top, 1=bottom */
+		}
+	}
+
+	dwindle_insert(root, new_c, focused, ratio, as_first);
+}
+
 void dwindle(Monitor *m) {
 	int32_t n = m->visible_tiling_clients;
 	if (n == 0)
@@ -327,7 +399,7 @@ void dwindle(Monitor *m) {
 
 	uint32_t tag = m->pertag->curtag;
 	DwindleNode **root = &m->pertag->dwindle_root[tag];
-	float ratio = m->pertag->mfacts[tag];
+	float ratio = config.dwindle_split_ratio;
 
 	Client *vis[512];
 	int32_t count = 0;
@@ -376,7 +448,7 @@ void dwindle(Monitor *m) {
 		focused = m->sel;
 	for (int32_t i = 0; i < count; i++) {
 		if (!dwindle_find_leaf(*root, vis[i]))
-			dwindle_insert(root, vis[i], focused, ratio, false);
+			dwindle_insert_with_config(root, vis[i], focused, ratio);
 	}
 
 	int32_t gap_ih = enablegaps ? m->gappih : 0;
