@@ -3481,7 +3481,7 @@ void createmon(struct wl_listener *listener, void *data) {
 		ext_manager, EXT_WORKSPACE_ENABLE_CAPS);
 	wlr_ext_workspace_group_handle_v1_output_enter(m->ext_group, m->wlr_output);
 
-	for (i = 1; i <= LENGTH(tags); i++) {
+	for (i = 1; i <= effective_tags; i++) {
 		add_workspace_by_tag(i, m);
 	}
 
@@ -7794,6 +7794,10 @@ void view_in_mon(const Arg *arg, bool want_animation, Monitor *m,
 	}
 
 	if (arg->ui == 0) {
+		return;
+	}
+
+	if ((arg->ui & effective_tagmask) == 0) {
 		return;
 	}
 
