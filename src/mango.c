@@ -2268,7 +2268,7 @@ void place_drag_tile_client(Client *c) {
 			c->mon->pertag->ltidxs[c->mon->pertag->curtag]->id == DWINDLE) {
 			uint32_t tag = c->mon->pertag->curtag;
 			dwindle_insert(&c->mon->pertag->dwindle_root[tag], c,
-						   closest_client, c->mon->pertag->mfacts[tag], false);
+						   closest_client, config.dwindle_split_ratio, false);
 		} else if (closest_client->link.prev != &c->link) {
 			wl_list_remove(&c->link);
 			c->link.next = &closest_client->link;
