@@ -120,7 +120,7 @@ int32_t exchange_client(const Arg *arg) {
 	if (c->mon && c->mon->pertag->ltidxs[c->mon->pertag->curtag]->id == DWINDLE) {
 		uint32_t tag = c->mon->pertag->curtag;
 		dwindle_move_client(&c->mon->pertag->dwindle_root[tag], c, tc,
-							c->mon->pertag->mfacts[tag], arg->i);
+							config.dwindle_split_ratio, arg->i);
 		arrange(c->mon, false, false);
 	} else {
 		exchange_two_client(c, tc);
