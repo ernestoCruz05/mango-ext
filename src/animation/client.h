@@ -284,13 +284,42 @@ static void scene_buffer_apply_canvas_clip(struct wlr_scene_buffer *buffer,
 	wlr_scene_buffer_set_dest_size(buffer, intersection.width,
 								   intersection.height);
 
-	int32_t node_x = crop_left + (int32_t)roundf(sub_x * zoom) - sub_x;
-	int32_t node_y = crop_top + (int32_t)roundf(sub_y * zoom) - sub_y;
+	int32_t node_x = crop_left;
+	int32_t node_y = crop_top;
 	wlr_scene_node_set_position(&buffer->node, node_x, node_y);
 
-	if (wlr_xdg_popup_try_from_wlr_surface(ss->surface) == NULL) {
-		wlr_scene_buffer_set_corner_radius(buffer, (int32_t)roundf(config.border_radius * zoom),
-										   cd->corners);
+	}
+
+static void find_buffer_bounds(struct wlr_scene_node *node,
+			       int32_t acc_x, int32_t acc_y,
+			       int32_t *min_x, int32_t *min_y,
+			       int32_t *max_x, int32_t *max_y) {
+	acc_x += node->x;
+	acc_y += node->y;
+	if (node->type == WLR_SCENE_NODE_BUFFER) {
+		struct wlr_scene_buffer *buf = wlr_scene_buffer_from_node(node);
+		int w = buf->dst_width;
+		int h = buf->dst_height;
+		if (w <= 0 || h <= 0) {
+			struct wlr_scene_surface *ss = wlr_scene_surface_try_from_buffer(buf);
+			if (ss && ss->surface) {
+				w = ss->surface->current.width;
+				h = ss->surface->current.height;
+			}
+		}
+		if (w > 0 && h > 0) {
+			if (acc_x < *min_x) *min_x = acc_x;
+			if (acc_y < *min_y) *min_y = acc_y;
+			if (acc_x + w > *max_x) *max_x = acc_x + w;
+			if (acc_y + h > *max_y) *max_y = acc_y + h;
+		}
+	}
+	if (node->type == WLR_SCENE_NODE_TREE) {
+		struct wlr_scene_tree *tree = wlr_scene_tree_from_node(node);
+		struct wlr_scene_node *child;
+		wl_list_for_each(child, &tree->children, link)
+			find_buffer_bounds(child, acc_x, acc_y,
+					   min_x, min_y, max_x, max_y);
 	}
 }
 
@@ -307,6 +336,42 @@ static void apply_canvas_clip_and_zoom(Client *c, float zoom, enum corner_locati
 		return;
 	}
 	wlr_scene_node_set_enabled(&c->scene_surface->node, true);
+
+
+	if (zoom == 1.0f) {
+		int32_t min_x = INT_MAX, min_y = INT_MAX, max_x = 0, max_y = 0;
+		find_buffer_bounds(&c->scene_surface->node, 0, 0,
+				   &min_x, &min_y, &max_x, &max_y);
+		if (min_x >= max_x || min_y >= max_y)
+			return;
+
+		int32_t bw = (int32_t)c->bw;
+		int32_t tree_sx = c->animation.current.x + bw;
+		int32_t tree_sy = c->animation.current.y + bw;
+
+		struct wlr_box buf_union = {
+			.x = tree_sx + min_x,
+			.y = tree_sy + min_y,
+			.width = max_x - min_x,
+			.height = max_y - min_y,
+		};
+
+		struct wlr_box visible;
+		if (!wlr_box_intersection(&visible, &buf_union, &c->mon->m)) {
+			wlr_scene_node_set_enabled(&c->scene_surface->node, false);
+			return;
+		}
+		wlr_scene_node_set_enabled(&c->scene_surface->node, true);
+
+		struct wlr_box clip = {
+			.x = visible.x - tree_sx,
+			.y = visible.y - tree_sy,
+			.width = visible.width,
+			.height = visible.height,
+		};
+		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, &clip);
+		return;
+	}
 
 	struct canvas_clip_data cd = {
 		.zoom = zoom,
@@ -542,17 +607,31 @@ void apply_border(Client *c) {
 		left_offset = 0;
 		top_offset = 0;
 	} else {
+		struct wlr_box ref = c->mon->m;
+		if (is_canvas_layout(c->mon)) {
+			ref = (struct wlr_box){INT_MAX, INT_MAX, 0, 0};
+			Monitor *m;
+			wl_list_for_each(m, &mons, link) {
+				if (m->m.x < ref.x) ref.x = m->m.x;
+				if (m->m.y < ref.y) ref.y = m->m.y;
+				int r = m->m.x + m->m.width;
+				int b = m->m.y + m->m.height;
+				if (r > ref.x + ref.width) ref.width = r - ref.x;
+				if (b > ref.y + ref.height) ref.height = b - ref.y;
+			}
+		}
+
 		right_offset =
 			GEZERO(c->animation.current.x + c->animation.current.width * zoom -
-				   c->mon->m.x - c->mon->m.width) /
+				   ref.x - ref.width) /
 			zoom;
 		bottom_offset =
 			GEZERO(c->animation.current.y + c->animation.current.height * zoom -
-				   c->mon->m.y - c->mon->m.height) /
+				   ref.y - ref.height) /
 			zoom;
 
-		left_offset = GEZERO(c->mon->m.x - c->animation.current.x) / zoom;
-		top_offset = GEZERO(c->mon->m.y - c->animation.current.y) / zoom;
+		left_offset = GEZERO(ref.x - c->animation.current.x) / zoom;
+		top_offset = GEZERO(ref.y - c->animation.current.y) / zoom;
 	}
 
 	int32_t inner_surface_width = GEZERO(clip_box.width - 2 * bw);
