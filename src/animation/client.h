@@ -337,7 +337,6 @@ static void apply_canvas_clip_and_zoom(Client *c, float zoom, enum corner_locati
 	}
 	wlr_scene_node_set_enabled(&c->scene_surface->node, true);
 
-
 	if (zoom == 1.0f) {
 		int32_t min_x = INT_MAX, min_y = INT_MAX, max_x = 0, max_y = 0;
 		find_buffer_bounds(&c->scene_surface->node, 0, 0,
@@ -600,25 +599,21 @@ void apply_border(Client *c) {
 
 	int32_t right_offset, bottom_offset, left_offset, top_offset;
 
-	if (c == grabc || (c->mon && !is_canvas_layout(c->mon) &&
-						!c->isfullscreen && !c->ismaximizescreen)) {
+	if (c == grabc) {
 		right_offset = 0;
 		bottom_offset = 0;
 		left_offset = 0;
 		top_offset = 0;
 	} else {
-		struct wlr_box ref = c->mon->m;
-		if (is_canvas_layout(c->mon)) {
-			ref = (struct wlr_box){INT_MAX, INT_MAX, 0, 0};
-			Monitor *m;
-			wl_list_for_each(m, &mons, link) {
-				if (m->m.x < ref.x) ref.x = m->m.x;
-				if (m->m.y < ref.y) ref.y = m->m.y;
-				int r = m->m.x + m->m.width;
-				int b = m->m.y + m->m.height;
-				if (r > ref.x + ref.width) ref.width = r - ref.x;
-				if (b > ref.y + ref.height) ref.height = b - ref.y;
-			}
+		struct wlr_box ref = {INT_MAX, INT_MAX, 0, 0};
+		Monitor *m;
+		wl_list_for_each(m, &mons, link) {
+			if (m->m.x < ref.x) ref.x = m->m.x;
+			if (m->m.y < ref.y) ref.y = m->m.y;
+			int r = m->m.x + m->m.width;
+			int b = m->m.y + m->m.height;
+			if (r > ref.x + ref.width) ref.width = r - ref.x;
+			if (b > ref.y + ref.height) ref.height = b - ref.y;
 		}
 
 		right_offset =
