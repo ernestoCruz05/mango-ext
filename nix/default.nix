@@ -22,7 +22,7 @@
   debug ? false,
 }:
 stdenv.mkDerivation {
-  pname = "mango";
+  pname = "mango-ext";
   version = "nightly";
 
   src = builtins.path {
@@ -62,11 +62,11 @@ stdenv.mkDerivation {
     ];
 
   passthru = {
-    providedSessions = ["mango"];
+    providedSessions = ["mango-ext"];
   };
 
   meta = {
-    mainProgram = "mango";
+    mainProgram = "mango-ext";
     description = "Practical and Powerful wayland compositor (dwm but wayland)";
     homepage = "https://github.com/mangowm/mango";
     license = lib.licenses.gpl3Plus;

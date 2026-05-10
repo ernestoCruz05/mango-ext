@@ -517,7 +517,7 @@ static void usage(void) {
 			"\t-O           Get all output (monitor) information\n"
 			"\t-T           Get number of tags\n"
 			"\t-L           Get all available layouts\n"
-			"\t-q           Quit mango\n"
+			"\t-q           Quit mango-ext\n"
 			"\t-o <output>  Select output (monitor)\n"
 			"\n"
 			"GET OPTIONS (used with -g or -w):\n"

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Encoding=UTF-8
+Name=Mango-ext
+DesktopNames=mango-ext;wlroots
+Comment=mango-ext WM
+Exec=mango-ext
+Icon=mango-ext
+Type=Application

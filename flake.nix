@@ -19,8 +19,8 @@
       ];
 
       flake = {
-        hmModules.mango = import ./nix/hm-modules.nix self;
-        nixosModules.mango = import ./nix/nixos-modules.nix self;
+        hmModules.mango-ext = import ./nix/hm-modules.nix self;
+        nixosModules.mango-ext = import ./nix/nixos-modules.nix self;
       };
 
       perSystem = {
@@ -29,7 +29,7 @@
         ...
       }: let
         inherit (pkgs) callPackage ;
-        mango = callPackage ./nix {
+        mango-ext = callPackage ./nix {
           inherit (inputs.scenefx.packages.${pkgs.stdenv.hostPlatform.system}) scenefx;
         };
         shellOverride = old: {
@@ -37,14 +37,14 @@
           buildInputs = old.buildInputs ++ [];
         };
       in {
-        packages.default = mango;
+        packages.default = mango-ext;
         overlayAttrs = {
-          inherit (config.packages) mango;
+          inherit (config.packages) mango-ext;
         };
         packages = {
-          inherit mango;
+          inherit mango-ext;
         };
-        devShells.default = mango.overrideAttrs shellOverride;
+        devShells.default = mango-ext.overrideAttrs shellOverride;
         formatter = pkgs.alejandra;
       };
       systems = [

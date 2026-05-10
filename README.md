@@ -3,6 +3,8 @@
   <img src="https://github.com/mangowm/mango/blob/main/assets/mango-transparency-256.png" alt="MangoWM Logo" width="120"/>
 </div>
 
+> **Fork notice:** this is `mango-ext`, a fork of [mangowm/mango](https://github.com/mangowm/mango) with additional canvas/zoom, dwindle, and touchscreen features (see *Extended configuration* below). It installs as the binary `mango-ext` and reads its config from `~/.config/mango-ext/` (system fallback `/etc/mango-ext/config.conf`), so it can live side-by-side with an upstream `mango` install from your package manager.
+
 This project's development is based on [dwl](https://codeberg.org/dwl/dwl/).
 
 
@@ -217,8 +219,8 @@ meson build -Dprefix=/usr
 sudo ninja -C build install
 
 git clone https://github.com/ernestoCruz05/mango-ext.git
-cd mango
-meson build -Dprefix=/usr
+cd mango-ext
+meson setup build -Dprefix=/usr
 sudo ninja -C build install
 ```
 
@@ -244,7 +246,7 @@ sudo ninja -C build install
 - alt+space: open rofi launcher
 - alt+q: kill client
 - alt+left/right/up/down: focus direction
-- super+m: quit mango
+- super+m: quit mango-ext
 
 ## My Dotfiles
 
@@ -264,12 +266,12 @@ yay -S foot xdg-desktop-portal-wlr swaybg wl-clip-persist cliphist wl-clipboard 
 - use my dms config
 
 ```bash
-git clone -b dms https://github.com/DreamMaoMao/mango-config.git ~/.config/mango
+git clone -b dms https://github.com/DreamMaoMao/mango-config.git ~/.config/mango-ext
 ```
 - use my daily config
 
 ```bash
-git clone https://github.com/DreamMaoMao/mango-config.git ~/.config/mango
+git clone https://github.com/DreamMaoMao/mango-config.git ~/.config/mango-ext
 ```
 
 
@@ -281,9 +283,9 @@ or the website docs [docs](https://mangowm.github.io/)
 
 # NixOS + Home-manager
 
-The repo contains a flake that provides a NixOS module and a home-manager module for mango.
-Use the NixOS module to install mango with other necessary components of a working Wayland environment.
-Use the home-manager module to declare configuration and autostart for mango.
+The repo contains a flake that provides a NixOS module and a home-manager module for mango-ext.
+Use the NixOS module to install mango-ext with other necessary components of a working Wayland environment.
+Use the home-manager module to declare configuration and autostart for mango-ext.
 
 Here's an example of using the modules in a flake:
 
@@ -296,8 +298,8 @@ Here's an example of using the modules in a flake:
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-parts.url = "github:hercules-ci/flake-parts";
-    mango = {
-      url = "github:mangowm/mango";
+    mango-ext = {
+      url = "github:ernestoCruz05/mango-ext";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -313,10 +315,10 @@ Here's an example of using the modules in a flake:
             modules = [
               inputs.home-manager.nixosModules.home-manager
 
-              # Add mango nixos module
-              inputs.mango.nixosModules.mango
+              # Add mango-ext nixos module
+              inputs.mango-ext.nixosModules.mango-ext
               {
-                programs.mango.enable = true;
+                programs.mango-ext.enable = true;
               }
               {
                 home-manager = {
@@ -328,7 +330,7 @@ Here's an example of using the modules in a flake:
                       (
                         { ... }:
                         {
-                          wayland.windowManager.mango = {
+                          wayland.windowManager.mango-ext = {
                             enable = true;
                             settings = ''
                               # see config.conf
@@ -342,8 +344,8 @@ Here's an example of using the modules in a flake:
                       )
                     ]
                     ++ [
-                      # Add mango hm module
-                      inputs.mango.hmModules.mango
+                      # Add mango-ext hm module
+                      inputs.mango-ext.hmModules.mango-ext
                     ];
                 };
               }

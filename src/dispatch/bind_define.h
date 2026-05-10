@@ -905,7 +905,7 @@ int32_t spawn_shell(const Arg *arg) {
 
 		// if execlp fails, we should not reach here
 		wlr_log(WLR_DEBUG,
-				"mango: failed to execute command '%s' with shell: %s\n",
+				"mango-ext: failed to execute command '%s' with shell: %s\n",
 				arg->v, strerror(errno));
 		_exit(EXIT_FAILURE);
 	}
@@ -928,7 +928,7 @@ int32_t spawn(const Arg *arg) {
 		// 2. 对整个参数字符串进行单词展开
 		wordexp_t p;
 		if (wordexp(arg->v, &p, 0) != 0) {
-			wlr_log(WLR_DEBUG, "mango: wordexp failed for '%s'\n", arg->v);
+			wlr_log(WLR_DEBUG, "mango-ext: wordexp failed for '%s'\n", arg->v);
 			_exit(EXIT_FAILURE);
 		}
 
@@ -936,7 +936,7 @@ int32_t spawn(const Arg *arg) {
 		execvp(p.we_wordv[0], p.we_wordv);
 
 		// 4. execvp 失败时：打印错误，释放 wordexp 资源，然后退出
-		wlr_log(WLR_DEBUG, "mango: execvp '%s' failed: %s\n", p.we_wordv[0],
+		wlr_log(WLR_DEBUG, "mango-ext: execvp '%s' failed: %s\n", p.we_wordv[0],
 				strerror(errno));
 		wordfree(&p); // 释放 wordexp 分配的内存
 		_exit(EXIT_FAILURE);

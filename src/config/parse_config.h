@@ -3070,7 +3070,7 @@ bool parse_config_file(Config *config, const char *file_path, bool must_exist) {
 						"variable not set.\n");
 				return false;
 			}
-			snprintf(full_path, sizeof(full_path), "%s/.config/mango/%s", home,
+			snprintf(full_path, sizeof(full_path), "%s/.config/mango-ext/%s", home,
 					 file_path + 1);
 		}
 		file = fopen(full_path, "r");
@@ -3951,13 +3951,13 @@ bool parse_config(void) {
 			return false;
 		}
 		// 构建日志文件路径
-		snprintf(filename, sizeof(filename), "%s/.config/mango/config.conf",
+		snprintf(filename, sizeof(filename), "%s/.config/mango-ext/config.conf",
 				 homedir);
 
 		// 检查文件是否存在
 		if (access(filename, F_OK) != 0) {
-			// 如果文件不存在，则使用 /etc/mango/config.conf
-			snprintf(filename, sizeof(filename), "%s/mango/config.conf",
+			// 如果文件不存在，则使用 /etc/mango-ext/config.conf
+			snprintf(filename, sizeof(filename), "%s/mango-ext/config.conf",
 					 SYSCONFDIR);
 		}
 	}

@@ -94,7 +94,7 @@ if get_option('asan')
   link_args += '-fsanitize=address'
 endif
 
-executable('mango',
+executable('mango-ext',
   'src/mango.c',
   'src/common/util.c',
   'src/ext-protocol/wlr_ext_workspace_v1.c',
@@ -148,6 +148,6 @@ executable('mmsg',
 
 desktop_install_dir = join_paths(prefix, 'share/wayland-sessions')
 portal_install_dir = join_paths(prefix, 'share/xdg-desktop-portal')
-install_data('assets/mango.desktop', install_dir : desktop_install_dir)
-install_data('assets/mango-portals.conf', install_dir : portal_install_dir)
-install_data('assets/config.conf', install_dir : join_paths(sysconfdir, 'mango'))
+install_data('assets/mango-ext.desktop', install_dir : desktop_install_dir)
+install_data('assets/mango-ext-portals.conf', install_dir : portal_install_dir)
+install_data('assets/config.conf', install_dir : join_paths(sysconfdir, 'mango-ext'))

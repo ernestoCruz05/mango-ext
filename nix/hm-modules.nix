@@ -6,7 +6,7 @@ self:
   ...
 }:
 let
-  cfg = config.wayland.windowManager.mango;
+  cfg = config.wayland.windowManager.mango-ext;
   selflib = import ./lib.nix lib;
   variables = lib.concatStringsSep " " cfg.systemd.variables;
   extraCommands = lib.concatStringsSep " && " cfg.systemd.extraCommands;
@@ -18,15 +18,15 @@ let
 in
 {
   options = {
-    wayland.windowManager.mango = with lib; {
+    wayland.windowManager.mango-ext = with lib; {
       enable = mkOption {
         type = types.bool;
         default = false;
       };
       package = lib.mkOption {
         type = lib.types.package;
-        default = self.packages.${pkgs.stdenv.hostPlatform.system}.mango;
-        description = "The mango package to use";
+        default = self.packages.${pkgs.stdenv.hostPlatform.system}.mango-ext;
+        description = "The mango-ext package to use";
       };
       systemd = {
         enable = mkOption {
@@ -34,8 +34,8 @@ in
           default = pkgs.stdenv.isLinux;
           example = false;
           description = ''
-            Whether to enable {file}`mango-session.target` on
-            mango startup. This links to
+            Whether to enable {file}`mango-ext-session.target` on
+            mango-ext startup. This links to
             {file}`graphical-session.target`.
             Some important environment variables will be imported to systemd
             and dbus user environment before reaching the target, including
@@ -67,7 +67,7 @@ in
           type = types.listOf types.str;
           default = [
             "systemctl --user reset-failed"
-            "systemctl --user start mango-session.target"
+            "systemctl --user start mango-ext-session.target"
           ];
           description = ''
             Extra commands to run after D-Bus activation.
@@ -166,7 +166,7 @@ in
         type = types.lines;
         default = "";
         description = ''
-          Extra configuration lines to add to `~/.config/mango/config.conf`.
+          Extra configuration lines to add to `~/.config/mango-ext/config.conf`.
           This is useful for advanced configurations that don't fit the structured
           settings format, or for options that aren't yet supported by the module.
         '';
@@ -195,10 +195,10 @@ in
       };
       autostart_sh = mkOption {
         description = ''
-          Shell script to run on mango startup. No shebang needed.
+          Shell script to run on mango-ext startup. No shebang needed.
 
           When this option is set, the script will be written to
-          `~/.config/mango/autostart.sh` and an `exec-once` line
+          `~/.config/mango-ext/autostart.sh` and an `exec-once` line
           will be automatically added to the config to execute it.
         '';
         type = types.lines;
@@ -227,17 +227,17 @@ in
             )
         )
         + lib.optionalString (cfg.extraConfig != "") cfg.extraConfig
-        + lib.optionalString (cfg.autostart_sh != "") "\nexec-once=~/.config/mango/autostart.sh\n";
+        + lib.optionalString (cfg.autostart_sh != "") "\nexec-once=~/.config/mango-ext/autostart.sh\n";
 
-      validatedConfig = pkgs.runCommand "mango-config.conf" { } ''
-        cp ${pkgs.writeText "mango-config.conf" finalConfigText} "$out"
-        ${cfg.package}/bin/mango -c "$out" -p || exit 1
+      validatedConfig = pkgs.runCommand "mango-ext-config.conf" { } ''
+        cp ${pkgs.writeText "mango-ext-config.conf" finalConfigText} "$out"
+        ${cfg.package}/bin/mango-ext -c "$out" -p || exit 1
       '';
     in
     {
       # Backwards compatibility warning for old string-based config
       warnings = lib.optional (builtins.isString cfg.settings) ''
-        wayland.windowManager.mango.settings: Using a string for settings is deprecated.
+        wayland.windowManager.mango-ext.settings: Using a string for settings is deprecated.
         Please migrate to the new structured attribute set format.
         See the module documentation for examples, or use the 'extraConfig' option for raw config strings.
         The old string format will be removed in a future release.
@@ -245,19 +245,19 @@ in
 
       home.packages = [ cfg.package ];
       xdg.configFile = {
-        "mango/config.conf" =
+        "mango-ext/config.conf" =
           lib.mkIf (cfg.settings != { } || cfg.extraConfig != "" || cfg.autostart_sh != "")
             {
               source = validatedConfig;
             };
-        "mango/autostart.sh" = lib.mkIf (cfg.autostart_sh != "") {
+        "mango-ext/autostart.sh" = lib.mkIf (cfg.autostart_sh != "") {
           source = autostart_sh;
           executable = true;
         };
       };
-      systemd.user.targets.mango-session = lib.mkIf cfg.systemd.enable {
+      systemd.user.targets.mango-ext-session = lib.mkIf cfg.systemd.enable {
         Unit = {
-          Description = "mango compositor session";
+          Description = "mango-ext compositor session";
           Documentation = [ "man:systemd.special(7)" ];
           BindsTo = [ "graphical-session.target" ];
           Wants = [
