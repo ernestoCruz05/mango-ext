@@ -12,7 +12,7 @@ Mango-exts `canvas` layout is similar to window managers like hevel. It lets you
 |`canvas_tiling_gap`|int| determines the size of window gaps when using canvas_tiling|
 |`canvas_pan_on_kill`|bool| wether or not to pan to another window when the current window is killed|
 |`canvas_anchor_animate`|bool| when set to 1, smoothly animates the pan when jumping to an anchor point. Default: 0 (instant teleport)|
-|`tag_carousel`|bool| when set to 1, tag switching wraps around carousel-style (last tag loops back to first). Default: 0 |
+|`tag_carousel`|bool| when set to 1, tag switching and window moving wrap around carousel-style (last tag loops back to first, and vice versa). Applies to `viewtoleft`/`viewtoright`, `tagtoleft`/`tagtoright`, and related dispatchers. Default: 0 |
 
 #### Window rules
 

@@ -1247,9 +1247,18 @@ int32_t tagtoleft(const Arg *arg) {
 		return 0;
 
 	if (selmon->sel != NULL &&
-		__builtin_popcount(selmon->tagset[selmon->seltags] & effective_tagmask) == 1 &&
-		selmon->tagset[selmon->seltags] > 1) {
-		tag(&(Arg){.ui = selmon->tagset[selmon->seltags] >> 1, .i = arg->i});
+		__builtin_popcount(selmon->tagset[selmon->seltags] & effective_tagmask) == 1) {
+		uint32_t target = selmon->tagset[selmon->seltags] >> 1;
+
+		if (target == 0) {
+			if (!config.tag_carousel)
+				return 0;
+			target = (1 << (effective_tags - 1)) & effective_tagmask;
+			selmon->carousel_anim_dir = -1;
+		}
+
+		tag(&(Arg){.ui = target & effective_tagmask, .i = arg->i});
+		selmon->carousel_anim_dir = 0;
 	}
 	return 0;
 }
@@ -1259,9 +1268,18 @@ int32_t tagtoright(const Arg *arg) {
 		return 0;
 
 	if (selmon->sel != NULL &&
-		__builtin_popcount(selmon->tagset[selmon->seltags] & effective_tagmask) == 1 &&
-		selmon->tagset[selmon->seltags] & (effective_tagmask >> 1)) {
-		tag(&(Arg){.ui = selmon->tagset[selmon->seltags] << 1, .i = arg->i});
+		__builtin_popcount(selmon->tagset[selmon->seltags] & effective_tagmask) == 1) {
+		uint32_t target = selmon->tagset[selmon->seltags] << 1;
+
+		if (!(target & effective_tagmask)) {
+			if (!config.tag_carousel)
+				return 0;
+			target = 1;
+			selmon->carousel_anim_dir = 1;
+		}
+
+		tag(&(Arg){.ui = target & effective_tagmask, .i = arg->i});
+		selmon->carousel_anim_dir = 0;
 	}
 	return 0;
 }
