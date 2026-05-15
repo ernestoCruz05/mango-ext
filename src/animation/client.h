@@ -298,14 +298,14 @@ static void find_buffer_bounds(struct wlr_scene_node *node,
 	acc_y += node->y;
 	if (node->type == WLR_SCENE_NODE_BUFFER) {
 		struct wlr_scene_buffer *buf = wlr_scene_buffer_from_node(node);
-		int w = buf->dst_width;
-		int h = buf->dst_height;
-		if (w <= 0 || h <= 0) {
-			struct wlr_scene_surface *ss = wlr_scene_surface_try_from_buffer(buf);
-			if (ss && ss->surface) {
-				w = ss->surface->current.width;
-				h = ss->surface->current.height;
-			}
+		int w = 0, h = 0;
+		struct wlr_scene_surface *ss = wlr_scene_surface_try_from_buffer(buf);
+		if (ss && ss->surface) {
+			w = ss->surface->current.width;
+			h = ss->surface->current.height;
+		} else {
+			w = buf->dst_width;
+			h = buf->dst_height;
 		}
 		if (w > 0 && h > 0) {
 			if (acc_x < *min_x) *min_x = acc_x;
@@ -338,33 +338,26 @@ static void apply_canvas_clip_and_zoom(Client *c, float zoom, enum corner_locati
 	wlr_scene_node_set_enabled(&c->scene_surface->node, true);
 
 	if (zoom == 1.0f) {
-		int32_t min_x = INT_MAX, min_y = INT_MAX, max_x = 0, max_y = 0;
-		find_buffer_bounds(&c->scene_surface->node, 0, 0,
-				   &min_x, &min_y, &max_x, &max_y);
-		if (min_x >= max_x || min_y >= max_y)
-			return;
-
 		int32_t bw = (int32_t)c->bw;
-		int32_t tree_sx = c->animation.current.x + bw;
-		int32_t tree_sy = c->animation.current.y + bw;
+		struct wlr_box geom;
+		client_get_geometry(c, &geom);
 
-		struct wlr_box buf_union = {
-			.x = tree_sx + min_x,
-			.y = tree_sy + min_y,
-			.width = max_x - min_x,
-			.height = max_y - min_y,
+		struct wlr_box content_screen = {
+			.x = c->animation.current.x + bw,
+			.y = c->animation.current.y + bw,
+			.width = c->animation.current.width - 2 * bw,
+			.height = c->animation.current.height - 2 * bw,
 		};
-
 		struct wlr_box visible;
-		if (!wlr_box_intersection(&visible, &buf_union, &c->mon->m)) {
+		if (!wlr_box_intersection(&visible, &content_screen, &c->mon->m)) {
 			wlr_scene_node_set_enabled(&c->scene_surface->node, false);
 			return;
 		}
 		wlr_scene_node_set_enabled(&c->scene_surface->node, true);
 
 		struct wlr_box clip = {
-			.x = visible.x - tree_sx,
-			.y = visible.y - tree_sy,
+			.x = visible.x - (c->animation.current.x + bw) + geom.x,
+			.y = visible.y - (c->animation.current.y + bw) + geom.y,
 			.width = visible.width,
 			.height = visible.height,
 		};
@@ -754,6 +747,163 @@ struct ivec2 clip_to_hide(Client *c, struct wlr_box *clip_box) {
 	}
 
 	return offset;
+}
+
+void client_set_drop_area(Client *c) {
+	bool first_draw = false;
+	int32_t drop_direction = UNDIR;
+
+	if (!c || !c->mon)
+		return;
+
+	if (!c->enable_drop_area_draw && !c->droparea->node.enabled) {
+		return;
+	}
+
+	if (!c->enable_drop_area_draw && c->droparea->node.enabled) {
+		wlr_scene_node_lower_to_bottom(&c->droparea->node);
+		wlr_scene_node_set_enabled(&c->droparea->node, false);
+		return;
+	} else if (c->enable_drop_area_draw && !c->droparea->node.enabled) {
+		wlr_scene_node_raise_to_top(&c->droparea->node);
+		wlr_scene_node_set_enabled(&c->droparea->node, true);
+		first_draw = true;
+	}
+
+	int32_t bw = (int32_t)c->bw;
+	int32_t client_width = c->geom.width - 2 * bw;
+	int32_t client_height = c->geom.height - 2 * bw;
+
+	// 光标在窗口客户区内的相对坐标
+	double rel_x = cursor->x - c->geom.x - bw;
+	double rel_y = cursor->y - c->geom.y - bw;
+
+	struct wlr_box drop_box;
+
+	const Layout *cur_layout = c->mon->pertag->ltidxs[c->mon->pertag->curtag];
+	bool dwindle_familiar =
+		cur_layout->id == DWINDLE && config.dwindle_drop_simple_split;
+
+	uint32_t nmaster = c->mon->pertag->nmasters[c->mon->pertag->curtag];
+
+	bool should_swap =
+		(cur_layout->id == DECK || cur_layout->id == VERTICAL_DECK ||
+		 cur_layout->id == MONOCLE || cur_layout->id == GRID ||
+		 cur_layout->id == VERTICAL_GRID) ||
+		((cur_layout->id == TILE || cur_layout->id == VERTICAL_TILE ||
+		  cur_layout->id == CENTER_TILE || cur_layout->id == RIGHT_TILE) &&
+		 nmaster == 1 && c->ismaster);
+
+	if (dwindle_familiar) {
+		bool split_h = c->geom.width >= c->geom.height;
+		float ratio = config.dwindle_split_ratio;
+		if (split_h) {
+			if (rel_x < client_width * 0.5) {
+				drop_direction = LEFT;
+				drop_box.x = bw;
+				drop_box.y = bw;
+				drop_box.width = (int32_t)(client_width * ratio);
+				drop_box.height = client_height;
+			} else {
+				drop_direction = RIGHT;
+				drop_box.x = bw + (int32_t)(client_width * ratio);
+				drop_box.y = bw;
+				drop_box.width = client_width - (int32_t)(client_width * ratio);
+				drop_box.height = client_height;
+			}
+		} else {
+			if (rel_y < client_height * 0.5) {
+				drop_direction = UP;
+				drop_box.x = bw;
+				drop_box.y = bw;
+				drop_box.width = client_width;
+				drop_box.height = (int32_t)(client_height * ratio);
+			} else {
+				drop_direction = DOWN;
+				drop_box.x = bw;
+				drop_box.y = bw + (int32_t)(client_height * ratio);
+				drop_box.width = client_width;
+				drop_box.height =
+					client_height - (int32_t)(client_height * ratio);
+			}
+		}
+	} else if (should_swap) {
+		drop_box.x = bw;
+		drop_box.y = bw;
+		drop_box.width = client_width;
+		drop_box.height = client_height;
+		drop_direction = UNDIR;
+	} else if (cur_layout->id == TILE || cur_layout->id == DECK ||
+			   cur_layout->id == CENTER_TILE || cur_layout->id == RIGHT_TILE) {
+		if (rel_y < client_height * 0.5) {
+			drop_direction = UP;
+			drop_box.x = bw;
+			drop_box.y = bw;
+			drop_box.width = client_width;
+			drop_box.height = client_height / 2;
+		} else {
+			drop_direction = DOWN;
+			drop_box.x = bw;
+			drop_box.y = bw + client_height / 2;
+			drop_box.width = client_width;
+			drop_box.height = client_height / 2;
+		}
+	} else if (cur_layout->id == VERTICAL_TILE ||
+			   cur_layout->id == VERTICAL_DECK) {
+		if (rel_x < client_width * 0.5) {
+			drop_direction = LEFT;
+			drop_box.x = bw;
+			drop_box.y = bw;
+			drop_box.width = client_width / 2;
+			drop_box.height = client_height;
+		} else {
+			drop_direction = RIGHT;
+			drop_box.x = bw + client_width / 2;
+			drop_box.y = bw;
+			drop_box.width = client_width / 2;
+			drop_box.height = client_height;
+		}
+	} else {
+		double dist_left = rel_x;
+		double dist_right = client_width - rel_x;
+		double dist_top = rel_y;
+		double dist_bottom = client_height - rel_y;
+
+		if (dist_left <= dist_right && dist_left <= dist_top &&
+			dist_left <= dist_bottom) {
+			drop_direction = LEFT;
+			drop_box.x = bw;
+			drop_box.y = bw;
+			drop_box.width = client_width / 2;
+			drop_box.height = client_height;
+		} else if (dist_right <= dist_top && dist_right <= dist_bottom) {
+			drop_direction = RIGHT;
+			drop_box.x = bw + client_width / 2;
+			drop_box.y = bw;
+			drop_box.width = client_width / 2;
+			drop_box.height = client_height;
+		} else if (dist_top <= dist_bottom) {
+			drop_direction = UP;
+			drop_box.x = bw;
+			drop_box.y = bw;
+			drop_box.width = client_width;
+			drop_box.height = client_height / 2;
+		} else {
+			drop_direction = DOWN;
+			drop_box.x = bw;
+			drop_box.y = bw + client_height / 2;
+			drop_box.width = client_width;
+			drop_box.height = client_height / 2;
+		}
+	}
+
+	if (!first_draw && c->drop_direction == drop_direction) {
+		return;
+	}
+	c->drop_direction = drop_direction;
+
+	wlr_scene_node_set_position(&c->droparea->node, drop_box.x, drop_box.y);
+	wlr_scene_rect_set_size(c->droparea, drop_box.width, drop_box.height);
 }
 
 void client_apply_clip(Client *c, float factor) {

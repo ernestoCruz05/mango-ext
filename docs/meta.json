@@ -11,7 +11,10 @@
 		"window-management",
 		"bindings",
 		"mango-ext-features",
+		"---Examples---",
+		"screenshot",
 		"---Reference---",
+		"nix-options",
 		"ipc",
 		"faq"
 	]

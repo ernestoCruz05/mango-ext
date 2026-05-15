@@ -119,7 +119,9 @@
 	(A && !(A)->isfloating && !(A)->isminimized && !(A)->iskilling &&          \
 	 !(A)->isunglobal)
 #define VISIBLEON(C, M)                                                        \
-	((C) && (M) && (C)->mon == (M) && ((C)->tags & (M)->tagset[(M)->seltags]))
+	((C) && (M) && (C)->mon == (M) &&                                          \
+	 (((C)->tags & (M)->tagset[(M)->seltags] || (C)->isglobal ||               \
+	   (C)->isunglobal)))
 #define LENGTH(X) (sizeof X / sizeof X[0])
 #define END(A) ((A) + LENGTH(A))
 #define CANVAS_MAX_TAGS 10
@@ -350,6 +352,7 @@ struct Client {
 	Monitor *mon;
 	struct wlr_scene_tree *scene;
 	struct wlr_scene_rect *border; /* top, bottom, left, right */
+	struct wlr_scene_rect *droparea;
 	struct wlr_scene_shadow *shadow;
 	struct wlr_scene_tree *scene_surface;
 	struct wl_list link;
@@ -459,8 +462,9 @@ struct Client {
 	int32_t allow_shortcuts_inhibit;
 	float scroller_proportion_single;
 	bool isfocusing;
-	struct Client *next_in_stack;
-	struct Client *prev_in_stack;
+	bool enable_drop_area_draw;
+	int32_t drop_direction;
+	struct wlr_box drag_tile_float_backup_geom;
 };
 
 typedef struct {
@@ -620,6 +624,7 @@ struct Monitor {
 	float canvas_saved_pan_y;
 	float canvas_saved_zoom;
 	int8_t carousel_anim_dir;
+	bool iscleanuping;
 };
 
 typedef struct {
@@ -635,6 +640,23 @@ typedef struct {
 	struct wl_listener unlock;
 	struct wl_listener destroy;
 } SessionLock;
+
+typedef struct DwindleNode DwindleNode;
+struct ScrollerStackNode {
+	Client *client;
+	float scroller_proportion;
+	float stack_proportion;
+	float scroller_proportion_single;
+
+	struct ScrollerStackNode *next_in_stack;
+	struct ScrollerStackNode *prev_in_stack;
+	struct ScrollerStackNode *all_next;
+};
+
+struct TagScrollerState {
+	struct ScrollerStackNode *all_first; /* 所有节点的单链表头 */
+	int count;
+};
 
 /* function declarations */
 static void applybounds(
@@ -731,8 +753,7 @@ static void motionnotify(uint32_t time, struct wlr_input_device *device,
 						 double sy_unaccel);
 static void motionrelative(struct wl_listener *listener, void *data);
 
-static void reset_foreign_tolevel(Client *c);
-static void remove_foreign_topleve(Client *c);
+static void reset_foreign_tolevel(Client *c, Monitor *oldmon, Monitor *newmon);
 static void add_foreign_topleve(Client *c);
 static void exchange_two_client(Client *c1, Client *c2);
 static void outputmgrapply(struct wl_listener *listener, void *data);
@@ -886,7 +907,7 @@ static void request_fresh_all_monitors(void);
 static Client *find_client_by_direction(Client *tc, const Arg *arg,
 										bool findfloating, bool ignore_align);
 static void exit_scroller_stack(Client *c);
-static Client *get_scroll_stack_head(Client *c);
+static Client *scroll_get_stack_head_client(Client *c);
 static bool client_only_in_one_tag(Client *c);
 static Client *get_focused_stack_client(Client *sc);
 static bool client_is_in_same_stack(Client *sc, Client *tc, Client *fc);
@@ -903,6 +924,24 @@ static void pre_caculate_before_arrange(Monitor *m, bool want_animation,
 static void client_pending_fullscreen_state(Client *c, int32_t isfullscreen);
 static void client_pending_maximized_state(Client *c, int32_t ismaximized);
 static void client_pending_minimized_state(Client *c, int32_t isminimized);
+static void scroller_insert_stack(Client *c, Client *target_client,
+								  bool insert_before);
+static void dwindle_move_client(DwindleNode **root, Client *c, Client *target,
+								float ratio, int32_t dir);
+static void dwindle_resize_client_step(Monitor *m, Client *c, int32_t dx,
+									   int32_t dy);
+static void dwindle_resize_client(Monitor *m, Client *c);
+
+static struct TagScrollerState *ensure_scroller_state(Monitor *m, uint32_t tag);
+static struct ScrollerStackNode *find_scroller_node(struct TagScrollerState *st,
+													Client *c);
+static void sync_scroller_state_to_clients(Monitor *m, uint32_t tag);
+static void scroller_node_remove(struct TagScrollerState *st,
+								 struct ScrollerStackNode *target);
+static struct ScrollerStackNode *
+scroller_node_create(struct TagScrollerState *st, Client *c);
+static void update_scroller_state(Monitor *m);
+Client *scroll_get_stack_tail_client(Client *c);
 
 #include "data/static_keymap.h"
 #include "dispatch/bind_declare.h"
@@ -973,7 +1012,7 @@ static KeyboardGroup *kb_group;
 static struct wl_list inputdevices;
 static struct wl_list keyboard_shortcut_inhibitors;
 static uint32_t cursor_mode;
-static Client *grabc;
+static Client *grabc, *dropc;
 static int32_t rzcorner;
 static int32_t grabcx, grabcy;						   /* client-relative */
 static int32_t drag_begin_cursorx, drag_begin_cursory; /* client-relative */
@@ -1062,8 +1101,8 @@ struct Pertag {
 	float    canvas_anchor_y[LENGTH(tags) + 1][9];
 	uint16_t canvas_anchor_valid[LENGTH(tags) + 1]; /* bitmask: bit N = anchor N set */
 	struct DwindleNode *dwindle_root[LENGTH(tags) + 1];
+	struct TagScrollerState *scroller_state[LENGTH(tags) + 1];
 };
-
 #include "config/parse_config.h"
 
 static struct wl_signal mango_print_status;
@@ -1139,6 +1178,7 @@ static void canvas_pan_to_client(Monitor *m, Client *c);
 #include "layout/canvas.h"
 #include "layout/dwindle.h"
 #include "layout/horizontal.h"
+#include "layout/scroll.h"
 #include "layout/vertical.h"
 #include "dispatch/bind_define.h"
 #include "dispatch/gesture.h"
@@ -1289,19 +1329,21 @@ void swallow(Client *c, Client *w) {
 	c->master_inner_per = w->master_inner_per;
 	c->master_mfact_per = w->master_mfact_per;
 	c->scroller_proportion = w->scroller_proportion;
-	c->next_in_stack = w->next_in_stack;
-	c->prev_in_stack = w->prev_in_stack;
+	c->isglobal = w->isglobal;
 
-	if (w->next_in_stack)
-		w->next_in_stack->prev_in_stack = c;
-	if (w->prev_in_stack)
-		w->prev_in_stack->next_in_stack = c;
+	/* 调整 w 的邻居指针，让它们指向 c */
 	c->stack_proportion = w->stack_proportion;
+
+	/* 全局链表替换 */
 	wl_list_insert(&w->link, &c->link);
 	wl_list_insert(&w->flink, &c->flink);
 
-	if (w->foreign_toplevel)
-		remove_foreign_topleve(w);
+	if (w->foreign_toplevel) {
+		wlr_foreign_toplevel_handle_v1_output_leave(w->foreign_toplevel,
+													w->mon->wlr_output);
+		wlr_foreign_toplevel_handle_v1_destroy(w->foreign_toplevel);
+		w->foreign_toplevel = NULL;
+	}
 
 	wlr_scene_node_set_enabled(&w->scene->node, false);
 	wlr_scene_node_set_enabled(&c->scene->node, true);
@@ -1309,10 +1351,48 @@ void swallow(Client *c, Client *w) {
 
 	if (!c->foreign_toplevel && c->mon)
 		add_foreign_toplevel(c);
+	else if (c->foreign_toplevel && c->mon) {
+		wlr_foreign_toplevel_handle_v1_output_enter(c->foreign_toplevel,
+													c->mon->wlr_output);
+	}
 
 	client_pending_fullscreen_state(c, w->isfullscreen);
 	client_pending_maximized_state(c, w->ismaximizescreen);
 	client_pending_minimized_state(c, w->isminimized);
+
+	/* ---------- 跨 tag 同步：dwindle 与 scroller ---------- */
+	Monitor *m;
+	wl_list_for_each(m, &mons, link) {
+		for (uint32_t t = 0; t < LENGTH(tags) + 1; t++) {
+			/* dwindle */
+			DwindleNode **root = &m->pertag->dwindle_root[t];
+			dwindle_remove(root, c);
+			DwindleNode *dnode = dwindle_find_leaf(*root, w);
+			if (dnode)
+				dnode->client = c;
+
+			/* scroller */
+			struct TagScrollerState *st = m->pertag->scroller_state[t];
+			if (!st)
+				continue;
+
+			/* 先移除 c 在任意 tag 中的旧节点 */
+			struct ScrollerStackNode *cn = find_scroller_node(st, c);
+			if (cn)
+				scroller_node_remove(st, cn);
+
+			/* 将 w 的节点（如果存在）转给 c */
+			struct ScrollerStackNode *wn = find_scroller_node(st, w);
+			if (wn)
+				wn->client = c;
+		}
+	}
+
+	/* 同步当前活动 tag 的全局客户端字段 */
+	if (c->mon) {
+		uint32_t curtag = c->mon->pertag->curtag;
+		sync_scroller_state_to_clients(c->mon, curtag);
+	}
 }
 
 bool switch_scratchpad_client_state(Client *c) {
@@ -1323,7 +1403,7 @@ bool switch_scratchpad_client_state(Client *c) {
 		Monitor *oldmon = c->mon;
 		c->scratchpad_switching_mon = true;
 		c->mon = selmon;
-		reset_foreign_tolevel(c);
+		reset_foreign_tolevel(c, oldmon, c->mon);
 		client_update_oldmonname_record(c, selmon);
 
 		// 根据新monitor调整窗口尺寸
@@ -1675,10 +1755,14 @@ void applyrules(Client *c) {
 
 		// set geometry of floating client
 
-		if (r->width > 0)
+		if (r->width > 1)
 			c->float_geom.width = r->width;
-		if (r->height > 0)
+		else if (r->width > 0 && r->width <= 1)
+			c->float_geom.width = round(mon->m.width * r->width);
+		if (r->height > 1)
 			c->float_geom.height = r->height;
+		else if (r->height > 0 && r->height <= 1)
+			c->float_geom.height = round(mon->m.height * r->height);
 
 		if (r->width > 0 || r->height > 0) {
 			c->iscustomsize = 1;
@@ -1999,6 +2083,9 @@ void arrangelayers(Monitor *m) {
 	if (!m->wlr_output->enabled)
 		return;
 
+	if (m->iscleanuping)
+		return;
+
 	/* Arrange exclusive surfaces from top->bottom */
 	for (i = 3; i >= 0; i--)
 		arrangelayer(m, &m->layers[i], &usable_area, 1);
@@ -2265,40 +2352,77 @@ void hold_end(struct wl_listener *listener, void *data) {
 										  event->time_msec, event->cancelled);
 }
 
-void place_drag_tile_client(Client *c) {
-	Client *tc = NULL;
-	Client *closest_client = NULL;
-	long min_distant = LONG_MAX;
-	long temp_distant;
-	int32_t x, y;
+Client *find_closest_tiled_client(Client *c) {
+	Client *tc, *closest = NULL;
+	long min_dist = LONG_MAX;
 
 	wl_list_for_each(tc, &clients, link) {
-		if (tc != c && ISTILED(tc) && VISIBLEON(tc, c->mon)) {
-			x = tc->geom.x + (int32_t)(tc->geom.width / 2) - cursor->x;
-			y = tc->geom.y + (int32_t)(tc->geom.height / 2) - cursor->y;
-			temp_distant = x * x + y * y;
-			if (temp_distant < min_distant) {
-				min_distant = temp_distant;
-				closest_client = tc;
-			}
+		if (tc == c || !ISTILED(tc) || !VISIBLEON(tc, c->mon))
+			continue;
+
+		if (cursor->x >= tc->geom.x &&
+			cursor->x < tc->geom.x + tc->geom.width &&
+			cursor->y >= tc->geom.y &&
+			cursor->y < tc->geom.y + tc->geom.height) {
+			return tc;
+		}
+
+		int32_t dx = tc->geom.x + (int32_t)(tc->geom.width / 2) - cursor->x;
+		int32_t dy = tc->geom.y + (int32_t)(tc->geom.height / 2) - cursor->y;
+		long dist = (long)dx * dx + (long)dy * dy;
+
+		if (dist < min_dist) {
+			min_dist = dist;
+			closest = tc;
 		}
 	}
-	if (closest_client) {
-		if (c->mon &&
-			c->mon->pertag->ltidxs[c->mon->pertag->curtag]->id == DWINDLE) {
+
+	return closest;
+}
+
+void place_drag_tile_client(Client *c) {
+	Client *closest = find_closest_tiled_client(c);
+
+	if (closest && closest->mon) {
+		const Layout *layout =
+			closest->mon->pertag->ltidxs[closest->mon->pertag->curtag];
+
+		if (closest->drop_direction == UNDIR) {
+			setfloating(c, 0);
+			exchange_two_client(c, closest);
+			return;
+		}
+
+		if (layout->id == SCROLLER) {
+			scroller_drop_tile(c, closest, 0);
+			return;
+		}
+		if (layout->id == VERTICAL_SCROLLER) {
+			scroller_drop_tile(c, closest, 1);
+			return;
+		}
+		if (layout->id == DWINDLE) {
 			uint32_t tag = c->mon->pertag->curtag;
-			dwindle_insert(&c->mon->pertag->dwindle_root[tag], c,
-						   closest_client, config.dwindle_split_ratio, false);
-		} else if (closest_client->link.prev != &c->link) {
+			bool insert_before = (closest->drop_direction == LEFT ||
+								  closest->drop_direction == UP);
+			bool split_h = (closest->drop_direction == LEFT ||
+							closest->drop_direction == RIGHT);
+			dwindle_insert(&c->mon->pertag->dwindle_root[tag], c, closest,
+						   config.dwindle_split_ratio, insert_before, split_h,
+						   !config.dwindle_drop_simple_split);
+			setfloating(c, 0);
+			return;
+		}
+
+		if (closest->drop_direction == LEFT || closest->drop_direction == UP) {
 			wl_list_remove(&c->link);
-			c->link.next = &closest_client->link;
-			c->link.prev = closest_client->link.prev;
-			closest_client->link.prev->next = &c->link;
-			closest_client->link.prev = &c->link;
+			wl_list_insert(closest->link.prev, &c->link);
 		} else {
-			exchange_two_client(c, closest_client);
+			wl_list_remove(&c->link);
+			wl_list_insert(&closest->link, &c->link);
 		}
 	}
+
 	setfloating(c, 0);
 }
 
@@ -2487,10 +2611,16 @@ bool handle_buttonpress(struct wlr_pointer_button_event *event) {
 			last_apply_drap_time = 0;
 			if (tmpc->drag_to_tile && config.drag_tile_to_tile) {
 				place_drag_tile_client(tmpc);
+				tmpc->float_geom = tmpc->drag_tile_float_backup_geom;
 			} else {
 				apply_window_snap(tmpc);
 			}
 			tmpc->drag_to_tile = false;
+			if (dropc) {
+				dropc->enable_drop_area_draw = false;
+				client_set_drop_area(dropc);
+				dropc = NULL;
+			}
 			return true;
 		} else {
 			cursor_mode = CurNormal;
@@ -2640,6 +2770,8 @@ void cleanupmon(struct wl_listener *listener, void *data) {
 	LayerSurface *l = NULL, *tmp = NULL;
 	uint32_t i;
 
+	m->iscleanuping = true;
+
 	/* m->layers[i] are intentionally not unlinked */
 	for (i = 0; i < LENGTH(m->layers); i++) {
 		wl_list_for_each_safe(l, tmp, &m->layers[i], link)
@@ -2672,6 +2804,12 @@ void cleanupmon(struct wl_listener *listener, void *data) {
 		m->skip_frame_timeout = NULL;
 	}
 	m->wlr_output->data = NULL;
+
+	for (uint32_t t = 0; t < LENGTH(tags) + 1; t++)
+		dwindle_free_tree(m->pertag->dwindle_root[t]);
+
+	cleanup_monitor_scroller(m);
+
 	free(m->pertag);
 	free(m);
 }
@@ -2696,7 +2834,13 @@ void closemon(Monitor *m) {
 		if (c->mon == m) {
 
 			if (selmon == NULL) {
-				remove_foreign_topleve(c);
+				if (c->foreign_toplevel) {
+					wlr_foreign_toplevel_handle_v1_output_leave(
+						c->foreign_toplevel, c->mon->wlr_output);
+					wlr_foreign_toplevel_handle_v1_destroy(c->foreign_toplevel);
+					c->foreign_toplevel = NULL;
+				}
+
 				c->mon = NULL;
 			} else {
 				client_change_mon(c, selmon);
@@ -3370,6 +3514,7 @@ void createmon(struct wl_listener *listener, void *data) {
 	struct wl_event_loop *loop = wl_display_get_event_loop(dpy);
 	m = wlr_output->data = ecalloc(1, sizeof(*m));
 
+	m->iscleanuping = false;
 	m->skip_frame_timeout =
 		wl_event_loop_add_timer(loop, monitor_skip_frame_timeout_callback, m);
 	m->skiping_frame = false;
@@ -3436,7 +3581,11 @@ void createmon(struct wl_listener *listener, void *data) {
 	wlr_output_state_finish(&state);
 
 	wl_list_insert(&mons, &m->link);
+
 	m->pertag = calloc(1, sizeof(Pertag));
+	for (int i = 0; i < LENGTH(tags) + 1; i++)
+		m->pertag->scroller_state[i] = NULL;
+
 	if (chvt_backup_tag &&
 		regex_match(chvt_backup_selmon, m->wlr_output->name)) {
 		m->tagset[0] = m->tagset[1] = (1 << (chvt_backup_tag - 1)) & effective_tagmask;
@@ -3693,6 +3842,15 @@ void createpointerconstraint(struct wl_listener *listener, void *data) {
 	pointer_constraint->constraint = data;
 	LISTEN(&pointer_constraint->constraint->events.destroy,
 		   &pointer_constraint->destroy, destroypointerconstraint);
+
+	if (!selmon || !selmon->sel)
+		return;
+
+	struct wlr_surface *focused_surface = client_surface(selmon->sel);
+	if (focused_surface &&
+		focused_surface == pointer_constraint->constraint->surface) {
+		cursorconstrain(pointer_constraint->constraint);
+	}
 }
 
 void createtouch(struct wlr_touch *wlr_touch) {
@@ -3709,11 +3867,18 @@ void cursorconstrain(struct wlr_pointer_constraint_v1 *constraint) {
 	if (active_constraint == constraint)
 		return;
 
-	if (active_constraint)
+	if (active_constraint) {
+		if (constraint == NULL) {
+			cursorwarptohint();
+		}
 		wlr_pointer_constraint_v1_send_deactivated(active_constraint);
+	}
 
 	active_constraint = constraint;
-	wlr_pointer_constraint_v1_send_activated(constraint);
+
+	if (constraint) {
+		wlr_pointer_constraint_v1_send_activated(constraint);
+	}
 }
 
 void cursorframe(struct wl_listener *listener, void *data) {
@@ -3945,8 +4110,14 @@ void focusclient(Client *c, int32_t lift) {
 	wl_list_for_each(um, &mons, link) {
 		if (um->wlr_output->enabled && um != selmon && um->sel &&
 			!um->sel->iskilling && um->sel->isfocusing) {
+
 			um->sel->isfocusing = false;
 			client_set_unfocused_opacity_animation(um->sel);
+
+			if (um->sel->foreign_toplevel) {
+				wlr_foreign_toplevel_handle_v1_set_activated(
+					um->sel->foreign_toplevel, false);
+			}
 		}
 	}
 
@@ -3990,6 +4161,9 @@ void focusclient(Client *c, int32_t lift) {
 		// clear text input focus state
 		dwl_im_relay_set_focus(dwl_input_method_relay, NULL);
 		wlr_seat_keyboard_notify_clear_focus(seat);
+		if (active_constraint) {
+			cursorconstrain(NULL);
+		}
 		return;
 	}
 
@@ -4006,6 +4180,18 @@ void focusclient(Client *c, int32_t lift) {
 
 	/* Activate the new client */
 	client_activate_surface(client_surface(c), 1);
+
+	if (active_constraint && active_constraint->surface != client_surface(c)) {
+		cursorconstrain(NULL);
+	}
+
+	struct wlr_pointer_constraint_v1 *constraint;
+	wl_list_for_each(constraint, &pointer_constraints->constraints, link) {
+		if (constraint->surface == client_surface(c)) {
+			cursorconstrain(constraint);
+			break;
+		}
+	}
 }
 
 void // 0.6
@@ -4411,6 +4597,8 @@ static void iter_xdg_scene_buffers(struct wlr_scene_buffer *buffer, int32_t sx,
 }
 
 void init_client_properties(Client *c) {
+	c->drop_direction = UNDIR;
+	c->enable_drop_area_draw = false;
 	c->isfocusing = false;
 	c->isfloating = 0;
 	c->isfakefullscreen = 0;
@@ -4486,8 +4674,6 @@ void init_client_properties(Client *c) {
 	c->float_geom.x = 0;
 	c->float_geom.y = 0;
 	c->stack_proportion = 0.0f;
-	c->next_in_stack = NULL;
-	c->prev_in_stack = NULL;
 	memset(c->oldmonname, 0, sizeof(c->oldmonname));
 	memcpy(c->opacity_animation.initial_border_color, config.bordercolor,
 		   sizeof(c->opacity_animation.initial_border_color));
@@ -4557,6 +4743,12 @@ mapnotify(struct wl_listener *listener, void *data) {
 	}
 
 	// extra node
+
+	c->droparea = wlr_scene_rect_create(c->scene, 0, 0, config.dropcolor);
+	wlr_scene_node_lower_to_bottom(&c->droparea->node);
+	wlr_scene_node_set_position(&c->droparea->node, 0, 0);
+	wlr_scene_node_set_enabled(&c->droparea->node, false);
+
 	c->border = wlr_scene_rect_create(
 		c->scene, 0, 0, c->isurgent ? config.urgentcolor : config.bordercolor);
 	wlr_scene_node_lower_to_bottom(&c->border->node);
@@ -4580,16 +4772,13 @@ mapnotify(struct wl_listener *listener, void *data) {
 
 		if (selmon->sel && ISSCROLLTILED(selmon->sel) &&
 			VISIBLEON(selmon->sel, selmon)) {
-			at_client = get_scroll_stack_head(selmon->sel);
+			at_client = scroll_get_stack_tail_client(selmon->sel);
 		} else {
 			at_client = center_tiled_select(selmon);
 		}
 
 		if (at_client) {
-			at_client->link.next->prev = &c->link;
-			c->link.prev = &at_client->link;
-			c->link.next = at_client->link.next;
-			at_client->link.next = &c->link;
+			wl_list_insert(&at_client->link, &c->link);
 		} else {
 			wl_list_insert(clients.prev, &c->link); // 尾部入栈
 		}
@@ -4671,7 +4860,11 @@ void set_minimized(Client *c) {
 	c->is_scratchpad_show = 0;
 	focusclient(focustop(selmon), 1);
 	arrange(c->mon, false, false);
-	wlr_foreign_toplevel_handle_v1_set_activated(c->foreign_toplevel, false);
+
+	if (c->foreign_toplevel)
+		wlr_foreign_toplevel_handle_v1_set_activated(c->foreign_toplevel,
+													 false);
+
 	wl_list_remove(&c->link);				// 从原来位置移除
 	wl_list_insert(clients.prev, &c->link); // 插入尾部
 }
@@ -4802,9 +4995,9 @@ void motionnotify(uint32_t time, struct wlr_input_device *device, double dx,
 				  double dy, double dx_unaccel, double dy_unaccel) {
 	double sx = 0, sy = 0, sx_confined, sy_confined;
 	Client *c = NULL, *w = NULL;
+	Client *closet_drop_client = NULL;
 	LayerSurface *l = NULL;
 	struct wlr_surface *surface = NULL;
-	struct wlr_pointer_constraint_v1 *constraint;
 	bool should_lock = false;
 
 	/* time is 0 in internal calls meant to restore pointer focus. */
@@ -4812,9 +5005,6 @@ void motionnotify(uint32_t time, struct wlr_input_device *device, double dx,
 		wlr_relative_pointer_manager_v1_send_relative_motion(
 			relative_pointer_mgr, seat, (uint64_t)time * 1000, dx, dy,
 			dx_unaccel, dy_unaccel);
-
-		wl_list_for_each(constraint, &pointer_constraints->constraints, link)
-			cursorconstrain(constraint);
 
 		if (active_constraint && cursor_mode != CurResize &&
 			cursor_mode != CurMove) {
@@ -4913,6 +5103,24 @@ void motionnotify(uint32_t time, struct wlr_input_device *device, double dx,
 							 .y = (int32_t)round(cursor->y) - grabcy,
 							 .width = grabc->geom.width,
 							 .height = grabc->geom.height};
+		if (config.drag_tile_to_tile && grabc->drag_to_tile) {
+			closet_drop_client = find_closest_tiled_client(grabc);
+			if (closet_drop_client && dropc && closet_drop_client != dropc) {
+				dropc->enable_drop_area_draw = false;
+				client_set_drop_area(dropc);
+				dropc = closet_drop_client;
+				dropc->enable_drop_area_draw = true;
+				client_set_drop_area(dropc);
+			} else if (closet_drop_client) {
+				dropc = closet_drop_client;
+				dropc->enable_drop_area_draw = true;
+				client_set_drop_area(dropc);
+			} else if (dropc) {
+				dropc->enable_drop_area_draw = false;
+				client_set_drop_area(dropc);
+				dropc = NULL;
+			}
+		}
 		resize(grabc, grabc->float_geom, 1);
 		return;
 	} else if (cursor_mode == CurResize) {
@@ -4931,12 +5139,7 @@ void motionnotify(uint32_t time, struct wlr_input_device *device, double dx,
 		} else if (grabc->mon &&
 				   grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id ==
 					   DWINDLE) {
-			int32_t dx = (int32_t)round(cursor->x) - grabcx;
-			int32_t dy = (int32_t)round(cursor->y) - grabcy;
-			grabcx = (int32_t)round(cursor->x);
-			grabcy = (int32_t)round(cursor->y);
-			if (dx || dy)
-				dwindle_resize_client(grabc->mon, grabc, dx, dy);
+			dwindle_resize_client(grabc->mon, grabc);
 		} else {
 			resize_tile_client(grabc, true, 0, 0, time);
 		}
@@ -5921,91 +6124,138 @@ void setborder_color(Client *c) {
 }
 
 void exchange_two_client(Client *c1, Client *c2) {
-
 	Monitor *tmp_mon = NULL;
 	uint32_t tmp_tags;
 	double master_inner_per = 0.0f;
 	double master_mfact_per = 0.0f;
 	double stack_inner_per = 0.0f;
-	float scroller_proportion = 0.0f;
-	float stack_proportion = 0.0f;
+	struct ScrollerStackNode *n1 = NULL;
+	struct ScrollerStackNode *n2 = NULL;
+	struct TagScrollerState *st1 = NULL;
+	struct TagScrollerState *st2 = NULL;
 
 	if (c1 == NULL || c2 == NULL ||
 		(!config.exchange_cross_monitor && c1->mon != c2->mon)) {
 		return;
 	}
 
-	if (c1->mon != c2->mon && (c1->prev_in_stack || c2->prev_in_stack ||
-							   c1->next_in_stack || c2->next_in_stack))
-		return;
-
-	Client *c1head = get_scroll_stack_head(c1);
-	Client *c2head = get_scroll_stack_head(c2);
-
-	// 交换布局参数
-	if (c1head == c2head) {
-		scroller_proportion = c1->scroller_proportion;
-		stack_proportion = c1->stack_proportion;
-
-		c1->scroller_proportion = c2->scroller_proportion;
-		c1->stack_proportion = c2->stack_proportion;
-		c2->scroller_proportion = scroller_proportion;
-		c2->stack_proportion = stack_proportion;
-	}
-
 	master_inner_per = c1->master_inner_per;
 	master_mfact_per = c1->master_mfact_per;
 	stack_inner_per = c1->stack_inner_per;
-
 	c1->master_inner_per = c2->master_inner_per;
 	c1->master_mfact_per = c2->master_mfact_per;
 	c1->stack_inner_per = c2->stack_inner_per;
-
 	c2->master_inner_per = master_inner_per;
 	c2->master_mfact_per = master_mfact_per;
 	c2->stack_inner_per = stack_inner_per;
 
-	// 交换栈链表连接
-	Client *tmp1_next_in_stack = c1->next_in_stack;
-	Client *tmp1_prev_in_stack = c1->prev_in_stack;
-	Client *tmp2_next_in_stack = c2->next_in_stack;
-	Client *tmp2_prev_in_stack = c2->prev_in_stack;
+	bool c1_scroller = c1->mon && is_scroller_layout(c1->mon);
+	bool c2_scroller = c2->mon && is_scroller_layout(c2->mon);
+	Monitor *m1 = c1->mon;
+	Monitor *m2 = c2->mon;
+	uint32_t tag1 = m1->pertag->curtag;
+	uint32_t tag2 = m2->pertag->curtag;
 
-	// 处理相邻节点的情况
-	if (c1->next_in_stack == c2) {
-		c1->next_in_stack = tmp2_next_in_stack;
-		c2->next_in_stack = c1;
-		c1->prev_in_stack = c2;
-		c2->prev_in_stack = tmp1_prev_in_stack;
-		if (tmp1_prev_in_stack)
-			tmp1_prev_in_stack->next_in_stack = c2;
-		if (tmp2_next_in_stack)
-			tmp2_next_in_stack->prev_in_stack = c1;
-	} else if (c2->next_in_stack == c1) {
-		c2->next_in_stack = tmp1_next_in_stack;
-		c1->next_in_stack = c2;
-		c2->prev_in_stack = c1;
-		c1->prev_in_stack = tmp2_prev_in_stack;
-		if (tmp2_prev_in_stack)
-			tmp2_prev_in_stack->next_in_stack = c1;
-		if (tmp1_next_in_stack)
-			tmp1_next_in_stack->prev_in_stack = c2;
-	} else if (is_scroller_layout(c1->mon) &&
-			   (c1->prev_in_stack || c2->prev_in_stack)) {
-		Client *c1head = get_scroll_stack_head(c1);
-		Client *c2head = get_scroll_stack_head(c2);
-		exchange_two_client(c1head, c2head);
-		focusclient(c1, 0);
-		return;
+	if (c1_scroller) {
+		st1 = ensure_scroller_state(m1, tag1);
+		n1 = find_scroller_node(st1, c1);
 	}
 
-	// 交换全局链表连接
+	if (c2_scroller) {
+		st2 = ensure_scroller_state(m2, tag2);
+		n2 = find_scroller_node(st2, c2);
+	}
+
+	if (!n1 || !n2)
+		goto exchange_common;
+
+	if (n1 && n2) {
+
+		/* 跨显示器且任一方有堆叠关系时不允许交换 */
+		if (m1 != m2 && (n1->prev_in_stack || n2->prev_in_stack ||
+						 n1->next_in_stack || n2->next_in_stack))
+			return;
+
+		/* 获取各自的堆叠头节点 */
+		struct ScrollerStackNode *head1 = n1;
+		while (head1->prev_in_stack)
+			head1 = head1->prev_in_stack;
+		struct ScrollerStackNode *head2 = n2;
+		while (head2->prev_in_stack)
+			head2 = head2->prev_in_stack;
+
+		/* 同一堆叠内交换 */
+		if (head1 == head2) {
+			float tmp_scroller = n1->scroller_proportion;
+			float tmp_stack = n1->stack_proportion;
+			n1->scroller_proportion = n2->scroller_proportion;
+			n1->stack_proportion = n2->stack_proportion;
+			n2->scroller_proportion = tmp_scroller;
+			n2->stack_proportion = tmp_stack;
+
+			/* 交换堆叠链表指针 */
+			struct ScrollerStackNode *p1 = n1->prev_in_stack;
+			struct ScrollerStackNode *next1 = n1->next_in_stack;
+			struct ScrollerStackNode *p2 = n2->prev_in_stack;
+			struct ScrollerStackNode *next2 = n2->next_in_stack;
+
+			if (n1->next_in_stack == n2) {
+				n1->next_in_stack = next2;
+				n2->prev_in_stack = p1;
+				n1->prev_in_stack = n2;
+				n2->next_in_stack = n1;
+				if (p1)
+					p1->next_in_stack = n2;
+				if (next2)
+					next2->prev_in_stack = n1;
+			} else if (n2->next_in_stack == n1) {
+				n2->next_in_stack = next1;
+				n1->prev_in_stack = p2;
+				n2->prev_in_stack = n1;
+				n1->next_in_stack = n2;
+				if (p2)
+					p2->next_in_stack = n1;
+				if (next1)
+					next1->prev_in_stack = n2;
+			} else {
+				if (p1)
+					p1->next_in_stack = n2;
+				if (next1)
+					next1->prev_in_stack = n2;
+				if (p2)
+					p2->next_in_stack = n1;
+				if (next2)
+					next2->prev_in_stack = n1;
+				n1->prev_in_stack = p2;
+				n1->next_in_stack = next2;
+				n2->prev_in_stack = p1;
+				n2->next_in_stack = next1;
+			}
+
+			sync_scroller_state_to_clients(m1, tag1);
+			arrange(m1, false, false);
+		} else {
+			/* 不同堆叠：交换两个堆叠整体位置 */
+			if (n1 != head1 || n2 != head2) {
+				/* 当前不是头部，递归交换头部 */
+				exchange_two_client(head1->client, head2->client);
+				return;
+			}
+		}
+	}
+
+exchange_common:
+
+	/* 跨显示器且任一方有堆叠关系时不允许交换 */
+	if (m1 != m2 && ((n1 && n1->prev_in_stack) || (n2 && n2->prev_in_stack) ||
+					 (n1 && n1->next_in_stack) || (n2 && n2->next_in_stack)))
+		return;
+
 	struct wl_list *tmp1_prev = c1->link.prev;
 	struct wl_list *tmp2_prev = c2->link.prev;
 	struct wl_list *tmp1_next = c1->link.next;
 	struct wl_list *tmp2_next = c2->link.next;
 
-	// 处理相邻节点的情况
 	if (c1->link.next == &c2->link) {
 		c1->link.next = c2->link.next;
 		c1->link.prev = &c2->link;
@@ -6020,38 +6270,49 @@ void exchange_two_client(Client *c1, Client *c2) {
 		c1->link.prev = tmp2_prev;
 		tmp2_prev->next = &c1->link;
 		tmp1_next->prev = &c2->link;
-	} else { // 不为相邻节点
+	} else {
 		c2->link.next = tmp1_next;
 		c2->link.prev = tmp1_prev;
 		c1->link.next = tmp2_next;
 		c1->link.prev = tmp2_prev;
-
 		tmp1_prev->next = &c2->link;
 		tmp1_next->prev = &c2->link;
 		tmp2_prev->next = &c1->link;
 		tmp2_next->prev = &c1->link;
 	}
 
-	// 处理跨监视器交换
-	if (config.exchange_cross_monitor) {
+	if (config.exchange_cross_monitor && c1->mon != c2->mon) {
+		DwindleNode **c1_root = &m1->pertag->dwindle_root[m1->pertag->curtag];
+		DwindleNode *c1node = dwindle_find_leaf(*c1_root, c1);
+
+		DwindleNode **c2_root = &m2->pertag->dwindle_root[m2->pertag->curtag];
+		DwindleNode *c2node = dwindle_find_leaf(*c2_root, c2);
+
+		if (c1node)
+			c1node->client = c2;
+
+		if (c2node)
+			c2node->client = c1;
+
 		tmp_mon = c2->mon;
 		tmp_tags = c2->tags;
 		setmon(c2, c1->mon, c1->tags, false);
 		setmon(c1, tmp_mon, tmp_tags, false);
 		if (c1->mon &&
-			c1->mon->pertag->ltidxs[c1->mon->pertag->curtag]->id == DWINDLE)
+			c1->mon->pertag->ltidxs[c1->mon->pertag->curtag]->id == DWINDLE) {
 			dwindle_swap_clients(
 				&c1->mon->pertag->dwindle_root[c1->mon->pertag->curtag], c1,
 				c2);
+		}
 		arrange(c1->mon, false, false);
 		arrange(c2->mon, false, false);
-		focusclient(c1, 0);
 	} else {
 		if (c1->mon &&
-			c1->mon->pertag->ltidxs[c1->mon->pertag->curtag]->id == DWINDLE)
+			c1->mon->pertag->ltidxs[c1->mon->pertag->curtag]->id == DWINDLE) {
 			dwindle_swap_clients(
 				&c1->mon->pertag->dwindle_root[c1->mon->pertag->curtag], c1,
 				c2);
+		}
 		arrange(c1->mon, false, false);
 	}
 
@@ -6321,24 +6582,18 @@ void reset_maximizescreen_size(Client *c) {
 }
 
 void exit_scroller_stack(Client *c) {
-	// If c is already in a stack, remove it.
-	if (c->prev_in_stack) {
-		c->prev_in_stack->next_in_stack = c->next_in_stack;
-	}
+	if (!c || !c->mon)
+		return;
 
-	if (!c->prev_in_stack && c->next_in_stack) {
-		c->next_in_stack->scroller_proportion = c->scroller_proportion;
-		wl_list_remove(&c->next_in_stack->link);
-		wl_list_insert(&c->link, &c->next_in_stack->link);
+	uint32_t tag = c->mon->pertag->curtag;
+	struct TagScrollerState *st = c->mon->pertag->scroller_state[tag];
+	if (st) {
+		struct ScrollerStackNode *n = find_scroller_node(st, c);
+		if (n) {
+			scroller_node_remove(st, n);
+			return; /* 节点已移除，客户端指针已在函数内清空 */
+		}
 	}
-
-	if (c->next_in_stack) {
-		c->next_in_stack->prev_in_stack = c->prev_in_stack;
-	}
-
-	c->prev_in_stack = NULL;
-	c->next_in_stack = NULL;
-	c->stack_proportion = 0.0f;
 }
 
 void setmaximizescreen(Client *c, int32_t maximizescreen) {
@@ -6597,7 +6852,7 @@ void setmon(Client *c, Monitor *m, uint32_t newtags, bool focus) {
 		arrange(oldmon, false, false);
 	if (m) {
 		/* Make sure window actually overlaps with the monitor */
-		reset_foreign_tolevel(c);
+		reset_foreign_tolevel(c, oldmon, m);
 		resize(c, c->geom, 0);
 		client_reset_mon_tags(c, m, newtags);
 		check_match_tag_floating_rule(c, m);
@@ -6644,7 +6899,9 @@ void show_hide_client(Client *c) {
 	}
 	client_pending_minimized_state(c, 0);
 	focusclient(c, 1);
-	wlr_foreign_toplevel_handle_v1_set_activated(c->foreign_toplevel, true);
+
+	if (c->foreign_toplevel)
+		wlr_foreign_toplevel_handle_v1_set_activated(c->foreign_toplevel, true);
 }
 
 void create_output(struct wlr_backend *backend, void *data) {
@@ -7526,9 +7783,15 @@ void unmapnotify(struct wl_listener *listener, void *data) {
 	Client *c = wl_container_of(listener, c, unmap);
 	Monitor *m = NULL;
 	Client *nextfocus = NULL;
-	Client *next_in_stack = c->next_in_stack;
-	Client *prev_in_stack = c->prev_in_stack;
 	c->iskilling = 1;
+	struct ScrollerStackNode *target_node =
+		c->mon ? find_scroller_node(
+					 c->mon->pertag->scroller_state[c->mon->pertag->curtag], c)
+			   : NULL;
+	struct ScrollerStackNode *prev_node =
+		target_node ? target_node->prev_in_stack : NULL;
+	struct ScrollerStackNode *next_node =
+		target_node ? target_node->next_in_stack : NULL;
 
 	if (config.animations && !c->is_clip_to_hide && !c->isminimized &&
 		(!c->mon || VISIBLEON(c, c->mon)))
@@ -7540,12 +7803,17 @@ void unmapnotify(struct wl_listener *listener, void *data) {
 		c->swallowedby->mon = c->mon;
 		swallow(c->swallowedby, c);
 	} else {
-		exit_scroller_stack(c);
+		scroller_remove_client(c);
+		dwindle_remove_client(c);
 	}
 
 	if (c == grabc) {
 		cursor_mode = CurNormal;
 		grabc = NULL;
+	}
+
+	if (c == dropc) {
+		dropc = NULL;
 	}
 
 	wl_list_for_each(m, &mons, link) {
@@ -7561,10 +7829,10 @@ void unmapnotify(struct wl_listener *listener, void *data) {
 	}
 
 	if (c->mon && c->mon == selmon) {
-		if (next_in_stack && !c->swallowedby) {
-			nextfocus = next_in_stack;
-		} else if (prev_in_stack && !c->swallowedby) {
-			nextfocus = prev_in_stack;
+		if (next_node && !c->swallowedby) {
+			nextfocus = next_node->client;
+		} else if (prev_node && !c->swallowedby) {
+			nextfocus = prev_node->client;
 		} else {
 			nextfocus = focustop(selmon);
 		}
@@ -7617,8 +7885,6 @@ void unmapnotify(struct wl_listener *listener, void *data) {
 	}
 
 	c->stack_proportion = 0.0f;
-	c->next_in_stack = NULL;
-	c->prev_in_stack = NULL;
 
 	dwindle_remove_client(c);
 	wlr_scene_node_destroy(&c->scene->node);
@@ -7739,7 +8005,7 @@ void updatemons(struct wl_listener *listener, void *data) {
 		wl_list_for_each(c, &clients, link) {
 			if (!c->mon && client_surface(c)->mapped) {
 				c->mon = selmon;
-				reset_foreign_tolevel(c);
+				reset_foreign_tolevel(c, NULL, c->mon);
 			}
 			if (c->tags == 0 && !c->is_in_scratchpad) {
 				c->tags = selmon->tagset[selmon->seltags];

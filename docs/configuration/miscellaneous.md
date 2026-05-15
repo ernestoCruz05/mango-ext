@@ -22,6 +22,7 @@ description: Advanced settings for XWayland, focus behavior, and system integrat
 | `warpcursor` | `1` | Warp the cursor to the center of the window when focus changes via keyboard. |
 | `cursor_hide_timeout` | `0` | Hide the cursor after `N` seconds of inactivity (`0` to disable). |
 | `drag_tile_to_tile` | `0` | Allow dragging a tiled window onto another to swap their positions. |
+| `drag_tile_small` | `1` | Allow dragging a tiled window temporarily to small size.|
 | `drag_corner` | `3` | Corner for drag-to-tile detection (0: none, 1–3: corners, 4: auto-detect). |
 | `drag_warp_cursor` | `1` | Warp cursor when dragging windows to tile. |
 | `axis_bind_apply_timeout` | `100` | Timeout (ms) for detecting consecutive scroll events for axis bindings. |
@@ -37,7 +38,6 @@ description: Advanced settings for XWayland, focus behavior, and system integrat
 | `max_tags` | `9` | Limit how many tags are active (2–9). Tags beyond this are unreachable. |
 | `scratchpad_cross_monitor` | `0` | Share the scratchpad pool across all monitors. |
 | `single_scratchpad` | `1` | Only allow one scratchpad (named or standard) to be visible at a time. |
-| `circle_layout` | - | A comma-separated list of layouts `switch_layout` cycles through,the value sample:`tile,scroller`. |
 
 ## Window Behavior
 

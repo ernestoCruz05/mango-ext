@@ -82,8 +82,8 @@ typedef struct {
 	char *monitor;
 	int32_t offsetx;
 	int32_t offsety;
-	int32_t width;
-	int32_t height;
+	float width;
+	float height;
 	int32_t nofocus;
 	int32_t nofadein;
 	int32_t nofadeout;
@@ -241,6 +241,7 @@ typedef struct {
 	int32_t snap_distance;
 	int32_t enable_floating_snap;
 	int32_t drag_tile_to_tile;
+	int32_t drag_tile_small;
 	uint32_t swipe_min_threshold;
 	float focused_opacity;
 	float unfocused_opacity;
@@ -262,6 +263,7 @@ typedef struct {
 	int32_t dwindle_preserve_split;
 	int32_t dwindle_smart_split;
 	int32_t dwindle_smart_resize;
+	int32_t dwindle_drop_simple_split;
 	float dwindle_split_ratio;
 
 	uint32_t hotarea_size;
@@ -354,6 +356,7 @@ typedef struct {
 	float scratchpad_height_ratio;
 	float rootcolor[4];
 	float bordercolor[4];
+	float dropcolor[4];
 	float focuscolor[4];
 	float maximizescreencolor[4];
 	float urgentcolor[4];
@@ -810,7 +813,6 @@ uint32_t parse_mod(const char *mod_str) {
 				}
 			}
 		} else {
-			// 完整的 modifier 检查（保留原始所有检查项）
 			if (!strcmp(token, "super") || !strcmp(token, "super_l") ||
 				!strcmp(token, "super_r")) {
 				mod |= WLR_MODIFIER_LOGO;
@@ -1619,6 +1621,8 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->enable_floating_snap = atoi(value);
 	} else if (strcmp(key, "drag_tile_to_tile") == 0) {
 		config->drag_tile_to_tile = atoi(value);
+	} else if (strcmp(key, "drag_tile_small") == 0) {
+		config->drag_tile_small = atoi(value);
 	} else if (strcmp(key, "swipe_min_threshold") == 0) {
 		config->swipe_min_threshold = atoi(value);
 	} else if (strcmp(key, "focused_opacity") == 0) {
@@ -1796,6 +1800,8 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->dwindle_smart_split = atoi(value);
 	} else if (strcmp(key, "dwindle_smart_resize") == 0) {
 		config->dwindle_smart_resize = atoi(value);
+	} else if (strcmp(key, "dwindle_drop_simple_split") == 0) {
+		config->dwindle_drop_simple_split = atoi(value);
 	} else if (strcmp(key, "dwindle_split_ratio") == 0) {
 		config->dwindle_split_ratio = atof(value);
 	} else if (strcmp(key, "hotarea_size") == 0) {
@@ -1956,6 +1962,17 @@ bool parse_option(Config *config, char *key, char *value) {
 			return false;
 		} else {
 			convert_hex_to_rgba(config->bordercolor, color);
+		}
+	} else if (strcmp(key, "dropcolor") == 0) {
+		int64_t color = parse_color(value);
+		if (color == -1) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Invalid dropcolor "
+					"format: %s\n",
+					value);
+			return false;
+		} else {
+			convert_hex_to_rgba(config->dropcolor, color);
 		}
 	} else if (strcmp(key, "focuscolor") == 0) {
 		int64_t color = parse_color(value);
@@ -2361,9 +2378,9 @@ bool parse_option(Config *config, char *key, char *value) {
 				} else if (strcmp(key, "no_force_center") == 0) {
 					rule->no_force_center = atoi(val);
 				} else if (strcmp(key, "width") == 0) {
-					rule->width = atoi(val);
+					rule->width = atof(val);
 				} else if (strcmp(key, "height") == 0) {
-					rule->height = atoi(val);
+					rule->height = atof(val);
 				} else if (strcmp(key, "isnoborder") == 0) {
 					rule->isnoborder = atoi(val);
 				} else if (strcmp(key, "isnoshadow") == 0) {
@@ -3508,10 +3525,14 @@ void override_config(void) {
 	config.new_is_master = CLAMP_INT(config.new_is_master, 0, 1);
 	config.dwindle_vsplit = CLAMP_INT(config.dwindle_vsplit, 0, 2);
 	config.dwindle_hsplit = CLAMP_INT(config.dwindle_hsplit, 0, 2);
-	config.dwindle_preserve_split = CLAMP_INT(config.dwindle_preserve_split, 0, 1);
+	config.dwindle_preserve_split =
+		CLAMP_INT(config.dwindle_preserve_split, 0, 1);
 	config.dwindle_smart_split = CLAMP_INT(config.dwindle_smart_split, 0, 1);
 	config.dwindle_smart_resize = CLAMP_INT(config.dwindle_smart_resize, 0, 1);
-	config.dwindle_split_ratio = CLAMP_FLOAT(config.dwindle_split_ratio, 0.05f, 0.95f);
+	config.dwindle_drop_simple_split =
+		CLAMP_INT(config.dwindle_drop_simple_split, 0, 1);
+	config.dwindle_split_ratio =
+		CLAMP_FLOAT(config.dwindle_split_ratio, 0.05f, 0.95f);
 	config.hotarea_size = CLAMP_INT(config.hotarea_size, 1, 1000);
 	config.hotarea_corner = CLAMP_INT(config.hotarea_corner, 0, 3);
 	config.enable_hotarea = CLAMP_INT(config.enable_hotarea, 0, 1);
@@ -3525,6 +3546,7 @@ void override_config(void) {
 	config.drag_floating_refresh_interval =
 		CLAMP_FLOAT(config.drag_floating_refresh_interval, 0.0f, 1000.0f);
 	config.drag_tile_to_tile = CLAMP_INT(config.drag_tile_to_tile, 0, 1);
+	config.drag_tile_small = CLAMP_INT(config.drag_tile_small, 0, 1);
 	config.allow_tearing = CLAMP_INT(config.allow_tearing, 0, 2);
 	config.allow_shortcuts_inhibit =
 		CLAMP_INT(config.allow_shortcuts_inhibit, 0, 1);
@@ -3671,6 +3693,7 @@ void set_value_default() {
 	config.dwindle_preserve_split = 0;
 	config.dwindle_smart_split = 0;
 	config.dwindle_smart_resize = 0;
+	config.dwindle_drop_simple_split = 1;
 	config.dwindle_split_ratio = 0.5f;
 
 	config.log_level = WLR_ERROR;
@@ -3724,6 +3747,7 @@ void set_value_default() {
 	config.no_radius_when_single = 0;
 	config.snap_distance = 30;
 	config.drag_tile_to_tile = 0;
+	config.drag_tile_small = 1;
 	config.enable_floating_snap = 0;
 	config.swipe_min_threshold = 1;
 
@@ -3838,6 +3862,10 @@ void set_value_default() {
 	config.bordercolor[1] = 0x44 / 255.0f;
 	config.bordercolor[2] = 0x44 / 255.0f;
 	config.bordercolor[3] = 1.0f;
+	config.dropcolor[0] = 0x8f / 255.0f;
+	config.dropcolor[1] = 0xba / 255.0f;
+	config.dropcolor[2] = 0x7c / 255.0f;
+	config.dropcolor[3] = 0.5f;
 	config.focuscolor[0] = 0xc6 / 255.0f;
 	config.focuscolor[1] = 0x6b / 255.0f;
 	config.focuscolor[2] = 0x25 / 255.0f;
@@ -4092,7 +4120,7 @@ void reapply_rootbg(void) {
 	wlr_scene_rect_set_color(root_bg, config.rootcolor);
 }
 
-void reapply_border(void) {
+void reapply_property(void) {
 	Client *c = NULL;
 
 	// reset border width when config change
@@ -4101,6 +4129,8 @@ void reapply_border(void) {
 			if (!c->isnoborder && !c->isfullscreen) {
 				c->bw = config.borderpx;
 			}
+
+			wlr_scene_rect_set_color(c->droparea, config.dropcolor);
 		}
 	}
 }
@@ -4246,7 +4276,7 @@ void reset_option(void) {
 	run_exec();
 
 	reapply_cursor_style();
-	reapply_border();
+	reapply_property();
 	reapply_rootbg();
 	reapply_keyboard();
 	reapply_pointer();
