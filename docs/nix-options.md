@@ -9,11 +9,11 @@ description: NixOS and Home Manager configuration options for mangowm.
 
 **System-level options via `programs.mango`.**
 
-### enable
+### programs\.mango-ext\.enable
 
 
 
-Whether to enable mango, a wayland compositor based on dwl\.
+Whether to enable mango-ext, a wayland compositor based on dwl\.
 
 
 
@@ -41,11 +41,11 @@ true
 
 
 
-### package
+### programs\.mango-ext\.package
 
 
 
-The mango package to use
+The mango-ext package to use
 
 
 
@@ -57,7 +57,7 @@ package
 *Default:*
 
 ```nix
-<derivation mango-nightly>
+<derivation mango-ext-nightly>
 ```
 
 *Declared by:*
@@ -65,11 +65,11 @@ package
 
 
 
-### addLoginEntry
+### programs\.mango-ext\.addLoginEntry
 
 
 
-Whether to add a login entry to the display manager for mango\. Only has effect if a display manager is configured (e\.g\. SDDM, GDM via ` services.displayManager `)\.
+Whether to add a login entry to the display manager for mango-ext\. Only has effect if a display manager is configured (e\.g\. SDDM, GDM via ` services.displayManager `)\.
 
 
 
@@ -91,7 +91,7 @@ true
 
 **Configure mangowm declaratively via `wayland.windowManager.mango`.**
 
-### enable
+### wayland\.windowManager\.mango-ext\.enable
 
 
 
@@ -115,11 +115,11 @@ false
 
 
 
-### package
+### wayland\.windowManager\.mango-ext\.package
 
 
 
-The mango package to use
+The mango-ext package to use
 
 
 
@@ -131,7 +131,7 @@ package
 *Default:*
 
 ```nix
-<derivation mango-nightly>
+<derivation mango-ext-nightly>
 ```
 
 *Declared by:*
@@ -139,14 +139,14 @@ package
 
 
 
-### autostart_sh
+### wayland\.windowManager\.mango-ext\.autostart_sh
 
 
 
-Shell script to run on mango startup\. No shebang needed\.
+Shell script to run on mango-ext startup\. No shebang needed\.
 
 When this option is set, the script will be written to
-` ~/.config/mango/autostart.sh ` and an ` exec-once ` line
+` ~/.config/mango-ext/autostart.sh ` and an ` exec-once ` line
 will be automatically added to the config to execute it\.
 
 
@@ -178,7 +178,7 @@ strings concatenated with “\\n”
 
 
 
-### bottomPrefixes
+### wayland\.windowManager\.mango-ext\.bottomPrefixes
 
 
 
@@ -213,11 +213,11 @@ list of string
 
 
 
-### extraConfig
+### wayland\.windowManager\.mango-ext\.extraConfig
 
 
 
-Extra configuration lines to add to ` ~/.config/mango/config.conf `\.
+Extra configuration lines to add to ` ~/.config/mango-ext/config.conf `\.
 This is useful for advanced configurations that don’t fit the structured
 settings format, or for options that aren’t yet supported by the module\.
 
@@ -250,7 +250,7 @@ strings concatenated with “\\n”
 
 
 
-### settings
+### wayland\.windowManager\.mango-ext\.settings
 
 
 
@@ -338,12 +338,12 @@ Mango configuration value
 
 
 
-### systemd\.enable
+### wayland\.windowManager\.mango-ext\.systemd\.enable
 
 
 
-Whether to enable ` mango-session.target ` on
-mango startup\. This links to
+Whether to enable ` mango-ext-session.target ` on
+mango-ext startup\. This links to
 ` graphical-session.target `\.
 Some important environment variables will be imported to systemd
 and dbus user environment before reaching the target, including
@@ -381,7 +381,7 @@ false
 
 
 
-### systemd\.extraCommands
+### wayland\.windowManager\.mango-ext\.systemd\.extraCommands
 
 
 
@@ -399,7 +399,7 @@ list of string
 ```nix
 [
   "systemctl --user reset-failed"
-  "systemctl --user start mango-session.target"
+  "systemctl --user start mango-ext-session.target"
 ]
 ```
 
@@ -408,7 +408,7 @@ list of string
 
 
 
-### systemd\.variables
+### wayland\.windowManager\.mango-ext\.systemd\.variables
 
 
 
@@ -450,7 +450,7 @@ list of string
 
 
 
-### systemd\.xdgAutostart
+### wayland\.windowManager\.mango-ext\.systemd\.xdgAutostart
 
 
 
@@ -484,7 +484,7 @@ true
 
 
 
-### topPrefixes
+### wayland\.windowManager\.mango-ext\.topPrefixes
 
 
 
