@@ -598,16 +598,7 @@ void apply_border(Client *c) {
 		left_offset = 0;
 		top_offset = 0;
 	} else {
-		struct wlr_box ref = {INT_MAX, INT_MAX, 0, 0};
-		Monitor *m;
-		wl_list_for_each(m, &mons, link) {
-			if (m->m.x < ref.x) ref.x = m->m.x;
-			if (m->m.y < ref.y) ref.y = m->m.y;
-			int r = m->m.x + m->m.width;
-			int b = m->m.y + m->m.height;
-			if (r > ref.x + ref.width) ref.width = r - ref.x;
-			if (b > ref.y + ref.height) ref.height = b - ref.y;
-		}
+		struct wlr_box ref = c->mon->m;
 
 		right_offset =
 			GEZERO(c->animation.current.x + c->animation.current.width * zoom -
