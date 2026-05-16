@@ -566,8 +566,7 @@ int32_t resizewin(const Arg *arg) {
 		c->geom.width += arg->i;
 		break;
 	default:
-		if (arg->i > 0)
-			c->geom.width = arg->i;
+		c->geom.width = arg->i;
 		break;
 	}
 
@@ -579,8 +578,7 @@ int32_t resizewin(const Arg *arg) {
 		c->geom.height += arg->i2;
 		break;
 	default:
-		if (arg->i2 > 0)
-			c->geom.height = arg->i2;
+		c->geom.height = arg->i2;
 		break;
 	}
 

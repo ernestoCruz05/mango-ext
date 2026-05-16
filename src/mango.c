@@ -3474,22 +3474,6 @@ bool apply_rule_to_state(Monitor *m, const ConfigMonitorRule *rule,
 }
 
 void createmon(struct wl_listener *listener, void *data) {
-	if (wlr_output_is_headless((struct wlr_output *)data)) {
-		if (!wlr_output_init_render((struct wlr_output *)data, alloc, drw))
-			return;
-		struct wlr_output_state state;
-		wlr_output_state_init(&state);
-		wlr_output_state_set_enabled(&state, true);
-		struct wlr_output_mode *mode =
-			wlr_output_preferred_mode((struct wlr_output *)data);
-		if (mode != NULL) {
-			wlr_output_state_set_mode(&state, mode);
-		}
-		wlr_output_commit_state((struct wlr_output *)data, &state);
-		wlr_output_state_finish(&state);
-		return;
-	}
-
 	/* This event is raised by the backend when a new output (aka a display or
 	 * monitor) becomes available. */
 	struct wlr_output *wlr_output = data;
