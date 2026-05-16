@@ -517,8 +517,7 @@ void client_draw_shadow(Client *c) {
 
 	int32_t right_offset, bottom_offset, left_offset, top_offset;
 
-	if (c == grabc || (c->mon && !is_canvas_layout(c->mon) &&
-						!c->isfullscreen && !c->ismaximizescreen)) {
+	if (c == grabc) {
 		right_offset = 0;
 		bottom_offset = 0;
 		left_offset = 0;

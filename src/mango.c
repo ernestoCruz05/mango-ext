@@ -6975,6 +6975,14 @@ void setup(void) {
 	if (!(backend = wlr_backend_autocreate(event_loop, &session)))
 		die("couldn't create backend");
 
+	struct wlr_backend *headless_backend =
+		wlr_headless_backend_create(event_loop);
+	if (!headless_backend) {
+		wlr_log(WLR_ERROR, "Failed to create secondary headless backend");
+	} else {
+		wlr_multi_backend_add(backend, headless_backend);
+	}
+
 	/* Initialize the scene graph used to lay out windows */
 	scene = wlr_scene_create();
 	root_bg = wlr_scene_rect_create(&scene->tree, 0, 0, config.rootcolor);
