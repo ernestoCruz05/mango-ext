@@ -341,6 +341,10 @@ static void apply_canvas_clip_and_zoom(Client *c, float zoom, enum corner_locati
 		int32_t bw = (int32_t)c->bw;
 		struct wlr_box geom;
 		client_get_geometry(c, &geom);
+		if (client_is_x11(c)) {
+			geom.x = 0;
+			geom.y = 0;
+		}
 
 		struct wlr_box content_screen = {
 			.x = c->animation.current.x + bw,
