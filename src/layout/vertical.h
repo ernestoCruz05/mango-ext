@@ -178,8 +178,7 @@ void vertical_deck(Monitor *m) {
 
 void vertical_grid(Monitor *m) {
 	int32_t i, n;
-	int32_t cx, cy, cw, ch;
-	int32_t dy;
+	int32_t cw, ch;
 	int32_t rows, cols, overrows;
 	Client *c = NULL;
 	int32_t target_gappo =
@@ -190,17 +189,13 @@ void vertical_grid(Monitor *m) {
 	float single_height_ratio = m->isoverview ? 0.8 : 0.9;
 
 	n = m->isoverview ? m->visible_clients : m->visible_tiling_clients;
-
-	if (n == 0) {
+	if (n == 0)
 		return;
-	}
 
 	if (n == 1) {
 		wl_list_for_each(c, &clients, link) {
-
 			if (c->mon != m)
 				continue;
-
 			if (VISIBLEON(c, m) && !c->isunglobal &&
 				((m->isoverview && !client_is_x11_popup(c)) || ISTILED(c))) {
 				ch = (m->w.height - 2 * target_gappo) * single_height_ratio;
@@ -216,69 +211,262 @@ void vertical_grid(Monitor *m) {
 	}
 
 	if (n == 2) {
-		ch = (m->w.height - 2 * target_gappo - target_gappi) / 2;
-		cw = (m->w.width - 2 * target_gappo) * 0.65;
+		float row_pers[2] = {1.0f, 1.0f};
+		// 先提取这两个窗口现有的行比例
 		i = 0;
 		wl_list_for_each(c, &clients, link) {
-
 			if (c->mon != m)
 				continue;
-
 			if (VISIBLEON(c, m) && !c->isunglobal &&
 				((m->isoverview && !client_is_x11_popup(c)) || ISTILED(c))) {
+				if (i < 2)
+					row_pers[i] =
+						(c->grid_row_per > 0.0f) ? c->grid_row_per : 1.0f;
+				i++;
+			}
+		}
+
+		float sum_row = row_pers[0] + row_pers[1];
+		float avail_h = m->w.height - 2 * target_gappo - target_gappi;
+		cw = (m->w.width - 2 * target_gappo) * 0.65; // 依然保持 0.65 的美观宽度
+
+		i = 0;
+		wl_list_for_each(c, &clients, link) {
+			if (c->mon != m)
+				continue;
+			if (VISIBLEON(c, m) && !c->isunglobal &&
+				((m->isoverview && !client_is_x11_popup(c)) || ISTILED(c))) {
+				c->grid_col_idx = 0;
+				c->grid_row_idx = i;
+				c->grid_col_per = 1.0f;
+				c->grid_row_per = row_pers[i];
+
+				// 根据分配的权重动态计算当前窗口的高度
+				ch = avail_h * (row_pers[i] / sum_row);
+
+				c->geom.x = m->w.x + (m->w.width - cw) / 2 + target_gappo;
 				if (i == 0) {
-					c->geom.x = m->w.x + (m->w.width - cw) / 2 + target_gappo;
 					c->geom.y = m->w.y + target_gappo;
-					c->geom.width = cw;
-					c->geom.height = ch;
-					resize(c, c->geom, 0);
 				} else if (i == 1) {
-					c->geom.x = m->w.x + (m->w.width - cw) / 2 + target_gappo;
-					c->geom.y = m->w.y + ch + target_gappo + target_gappi;
-					c->geom.width = cw;
-					c->geom.height = ch;
-					resize(c, c->geom, 0);
+					// 第二个窗口的 Y 坐标紧跟第一个窗口下面
+					float ch0 = avail_h * (row_pers[0] / sum_row);
+					c->geom.y = m->w.y + target_gappo + ch0 + target_gappi;
 				}
+				c->geom.width = cw;
+				c->geom.height = ch;
+				resize(c, c->geom, 0);
 				i++;
 			}
 		}
 		return;
 	}
-
 	for (rows = 0; rows <= n / 2; rows++) {
-		if (rows * rows >= n) {
+		if (rows * rows >= n)
 			break;
-		}
 	}
 	cols = (rows && (rows - 1) * rows >= n) ? rows - 1 : rows;
-
-	cw = (m->w.width - 2 * target_gappo - (cols - 1) * target_gappi) / cols;
-	ch = (m->w.height - 2 * target_gappo - (rows - 1) * target_gappi) / rows;
-
 	overrows = n % rows;
-	if (overrows) {
-		dy = (m->w.height - overrows * ch - (overrows - 1) * target_gappi) / 2 -
-			 target_gappo;
-	}
+
+	float col_pers[cols];
+	float row_pers[rows];
+	for (i = 0; i < cols; i++)
+		col_pers[i] = 1.0f;
+	for (i = 0; i < rows; i++)
+		row_pers[i] = 1.0f;
 
 	i = 0;
 	wl_list_for_each(c, &clients, link) {
 		if (c->mon != m)
 			continue;
-
 		if (VISIBLEON(c, m) && !c->isunglobal &&
 			((m->isoverview && !client_is_x11_popup(c)) || ISTILED(c))) {
-			cx = m->w.x + (i / rows) * (cw + target_gappi);
-			cy = m->w.y + (i % rows) * (ch + target_gappi);
+			int32_t c_idx = i / rows;
+			int32_t r_idx = i % rows;
+			if (r_idx == 0)
+				col_pers[c_idx] =
+					(c->grid_col_per > 0.0f) ? c->grid_col_per : 1.0f;
+			if (c_idx == 0)
+				row_pers[r_idx] =
+					(c->grid_row_per > 0.0f) ? c->grid_row_per : 1.0f;
+			i++;
+		}
+	}
+
+	float sum_col = 0.0f, sum_row = 0.0f;
+	for (i = 0; i < cols; i++)
+		sum_col += col_pers[i];
+	for (i = 0; i < rows; i++)
+		sum_row += row_pers[i];
+
+	float avail_w = m->w.width - 2 * target_gappo - (cols - 1) * target_gappi;
+	float avail_h = m->w.height - 2 * target_gappo - (rows - 1) * target_gappi;
+
+	i = 0;
+	wl_list_for_each(c, &clients, link) {
+		if (c->mon != m)
+			continue;
+		if (VISIBLEON(c, m) && !c->isunglobal &&
+			((m->isoverview && !client_is_x11_popup(c)) || ISTILED(c))) {
+			int32_t c_idx = i / rows;
+			int32_t r_idx = i % rows;
+
+			c->grid_col_per = col_pers[c_idx];
+			c->grid_row_per = row_pers[r_idx];
+			c->grid_col_idx = c_idx;
+			c->grid_row_idx = r_idx;
+
+			float fl_cy = m->w.y + target_gappo;
+			float fl_ch = 0.0f;
+
 			if (overrows && i >= n - overrows) {
-				cy += dy;
+				float over_h = 0.0f;
+				for (int j = 0; j < overrows; j++)
+					over_h += avail_h * (row_pers[j] / sum_row);
+				over_h += (overrows - 1) * target_gappi;
+				float dy = (m->w.height - over_h) / 2.0f - target_gappo;
+
+				fl_cy += dy;
+				for (int j = 0; j < r_idx; j++)
+					fl_cy += avail_h * (row_pers[j] / sum_row) + target_gappi;
+				fl_ch = avail_h * (row_pers[r_idx] / sum_row);
+			} else {
+				for (int j = 0; j < r_idx; j++)
+					fl_cy += avail_h * (row_pers[j] / sum_row) + target_gappi;
+				fl_ch = (r_idx == rows - 1)
+							? (m->w.y + m->w.height - target_gappo - fl_cy)
+							: avail_h * (row_pers[r_idx] / sum_row);
 			}
-			c->geom.x = cx + target_gappo;
-			c->geom.y = cy + target_gappo;
-			c->geom.width = cw;
-			c->geom.height = ch;
+
+			float fl_cx = m->w.x + target_gappo;
+			for (int j = 0; j < c_idx; j++)
+				fl_cx += avail_w * (col_pers[j] / sum_col) + target_gappi;
+			float fl_cw = (c_idx == cols - 1)
+							  ? (m->w.x + m->w.width - target_gappo - fl_cx)
+							  : avail_w * (col_pers[c_idx] / sum_col);
+
+			c->geom.x = (int32_t)fl_cx;
+			c->geom.y = (int32_t)fl_cy;
+			c->geom.width = (int32_t)fl_cw;
+			c->geom.height = (int32_t)fl_ch;
 			resize(c, c->geom, 0);
 			i++;
 		}
+	}
+}
+
+void vertical_fair(Monitor *m) {
+	int32_t i, n = 0;
+	Client *c = NULL;
+
+	n = m->visible_tiling_clients;
+	if (n == 0)
+		return;
+
+	int32_t cur_gappiv = enablegaps ? m->gappiv : 0;
+	int32_t cur_gappih = enablegaps ? m->gappih : 0;
+	int32_t cur_gappov = enablegaps ? m->gappov : 0;
+	int32_t cur_gappoh = enablegaps ? m->gappoh : 0;
+
+	cur_gappiv = config.smartgaps && n == 1 ? 0 : cur_gappiv;
+	cur_gappih = config.smartgaps && n == 1 ? 0 : cur_gappih;
+	cur_gappov = config.smartgaps && n == 1 ? 0 : cur_gappov;
+	cur_gappoh = config.smartgaps && n == 1 ? 0 : cur_gappoh;
+
+	int32_t rows;
+	for (rows = 0; rows <= n; rows++) {
+		if (rows * rows >= n)
+			break;
+	}
+
+	int32_t base_cols = n / rows;
+	int32_t remainder = n % rows;
+	int32_t first_group_rows = rows - remainder;
+	int32_t first_group_count = first_group_rows * base_cols;
+	int32_t max_cols = base_cols + (remainder > 0 ? 1 : 0);
+
+	float row_pers[rows];
+	float col_pers[max_cols];
+	for (i = 0; i < rows; i++)
+		row_pers[i] = 1.0f;
+	for (i = 0; i < max_cols; i++)
+		col_pers[i] = 1.0f;
+
+	i = 0;
+	wl_list_for_each(c, &clients, link) {
+		if (!VISIBLEON(c, m) || !ISTILED(c))
+			continue;
+		int32_t row_idx, col_idx;
+		if (i < first_group_count) {
+			row_idx = i / base_cols;
+			col_idx = i % base_cols;
+		} else {
+			int32_t offset = i - first_group_count;
+			row_idx = first_group_rows + (offset / (base_cols + 1));
+			col_idx = offset % (base_cols + 1);
+		}
+
+		if (col_idx == 0)
+			row_pers[row_idx] =
+				(c->grid_row_per > 0.0f) ? c->grid_row_per : 1.0f;
+		if (row_idx == 0)
+			col_pers[col_idx] =
+				(c->grid_col_per > 0.0f) ? c->grid_col_per : 1.0f;
+		i++;
+	}
+
+	float sum_row = 0.0f;
+	for (i = 0; i < rows; i++)
+		sum_row += row_pers[i];
+	float avail_h = m->w.height - 2 * cur_gappov - (rows - 1) * cur_gappiv;
+
+	i = 0;
+	wl_list_for_each(c, &clients, link) {
+		if (!VISIBLEON(c, m) || !ISTILED(c))
+			continue;
+
+		int32_t row_idx, col_idx, cols_in_this_row;
+		if (i < first_group_count) {
+			row_idx = i / base_cols;
+			col_idx = i % base_cols;
+			cols_in_this_row = base_cols;
+		} else {
+			int32_t offset = i - first_group_count;
+			row_idx = first_group_rows + (offset / (base_cols + 1));
+			col_idx = offset % (base_cols + 1);
+			cols_in_this_row = base_cols + 1;
+		}
+
+		c->grid_row_per = row_pers[row_idx];
+		c->grid_col_per = col_pers[col_idx];
+		c->grid_row_idx = row_idx;
+		c->grid_col_idx = col_idx;
+
+		float fl_cy = m->w.y + cur_gappov;
+		for (int j = 0; j < row_idx; j++)
+			fl_cy += avail_h * (row_pers[j] / sum_row) + cur_gappiv;
+		float fl_ch = (row_idx == rows - 1)
+						  ? (m->w.y + m->w.height - cur_gappov - fl_cy)
+						  : avail_h * (row_pers[row_idx] / sum_row);
+
+		float sum_col_this_row = 0.0f;
+		for (int j = 0; j < cols_in_this_row; j++)
+			sum_col_this_row += col_pers[j];
+
+		float avail_w =
+			m->w.width - 2 * cur_gappoh - (cols_in_this_row - 1) * cur_gappih;
+		float fl_cx = m->w.x + cur_gappoh;
+		for (int j = 0; j < col_idx; j++)
+			fl_cx += avail_w * (col_pers[j] / sum_col_this_row) + cur_gappih;
+		float fl_cw = (col_idx == cols_in_this_row - 1)
+						  ? (m->w.x + m->w.width - cur_gappoh - fl_cx)
+						  : avail_w * (col_pers[col_idx] / sum_col_this_row);
+
+		resize(c,
+			   (struct wlr_box){.x = (int32_t)fl_cx,
+								.y = (int32_t)fl_cy,
+								.width = (int32_t)fl_cw,
+								.height = (int32_t)fl_ch},
+			   0);
+		i++;
 	}
 }

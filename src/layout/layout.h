@@ -13,6 +13,8 @@ static void vertical_scroller(Monitor *m);
 static void vertical_deck(Monitor *mon);
 static void canvas(Monitor *m);
 static void dwindle(Monitor *m);
+static void fair(Monitor *m);
+static void vertical_fair(Monitor *m);
 
 /* layout(s) */
 Layout overviewlayout = {"󰃇", overview, "overview"};
@@ -31,6 +33,8 @@ enum {
 	RIGHT_TILE,
 	CANVAS,
 	DWINDLE,
+	FAIR,
+	VERTICAL_FAIR,
 };
 
 Layout layouts[] = {
@@ -50,4 +54,6 @@ Layout layouts[] = {
 	{"VK", vertical_deck, "vertical_deck", VERTICAL_DECK}, // 垂直卡片布局
 	{"CV", canvas, "canvas", CANVAS},					   // canvas layout
 	{"DW", dwindle, "dwindle", DWINDLE},
+	{"F", fair, "fair", FAIR},
+	{"VF", vertical_fair, "vertical_fair", VERTICAL_FAIR},
 };

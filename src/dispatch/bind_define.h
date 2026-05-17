@@ -1818,6 +1818,11 @@ int32_t toggleoverview(const Arg *arg) {
 	// 正常视图到overview,退出所有窗口的浮动和全屏状态参与平铺,
 	// overview到正常视图,还原之前退出的浮动和全屏窗口状态
 	if (selmon->isoverview) {
+
+		// 让游戏窗口无法强制约束鼠标
+		wlr_seat_pointer_clear_focus(seat);
+		wlr_cursor_set_xcursor(cursor, cursor_mgr, "default");
+
 		wl_list_for_each(c, &clients, link) {
 			if (c && c->mon == selmon && !client_is_unmanaged(c) &&
 				!client_is_x11_popup(c) && !c->isunglobal)
@@ -2182,4 +2187,59 @@ int32_t toggle_all_floating(const Arg *arg) {
 		}
 	}
 	return 0;
+}
+
+int32_t dwindle_set_split_direction(Client *c, bool istoggle, bool horizontal) {
+
+	const Layout *layout = c->mon->pertag->ltidxs[c->mon->pertag->curtag];
+
+	if (layout->id != DWINDLE)
+		return 0;
+
+	DwindleNode **root = &selmon->pertag->dwindle_root[selmon->pertag->curtag];
+	DwindleNode *leaf = dwindle_find_leaf(*root, c);
+
+	if (!leaf)
+		return 0;
+
+	if (istoggle) {
+		leaf->custom_leaf_split_h = !leaf->custom_leaf_split_h;
+	} else if (horizontal) {
+		leaf->custom_leaf_split_h = true;
+	} else {
+		leaf->custom_leaf_split_h = false;
+	}
+	bool hit_no_border = check_hit_no_border(c);
+	apply_split_border(c, hit_no_border);
+	return 0;
+}
+
+int32_t dwindle_toggle_split_direction(const Arg *arg) {
+	if (!selmon || !selmon->sel)
+		return 0;
+
+	Client *c = selmon->sel;
+	if (!c || !c->mon || c->isfloating)
+		return 0;
+	return dwindle_set_split_direction(selmon->sel, true, false);
+}
+
+int32_t dwindle_split_horizontal(const Arg *arg) {
+	if (!selmon || !selmon->sel)
+		return 0;
+
+	Client *c = selmon->sel;
+	if (!c || !c->mon || c->isfloating)
+		return 0;
+	return dwindle_set_split_direction(selmon->sel, false, true);
+}
+
+int32_t dwindle_split_vertical(const Arg *arg) {
+	if (!selmon || !selmon->sel)
+		return 0;
+
+	Client *c = selmon->sel;
+	if (!c || !c->mon || c->isfloating)
+		return 0;
+	return dwindle_set_split_direction(selmon->sel, false, false);
 }
