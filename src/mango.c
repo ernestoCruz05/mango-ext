@@ -120,6 +120,8 @@
 #define LENGTH(X) (sizeof X / sizeof X[0])
 #define END(A) ((A) + LENGTH(A))
 #define TAGMASK ((1 << LENGTH(tags)) - 1)
+static int32_t effective_tags;
+static uint32_t effective_tagmask;
 #define LISTEN(E, L, H) wl_signal_add((E), ((L)->notify = (H), (L)))
 #define ISFULLSCREEN(A)                                                        \
 	((A)->isfullscreen || (A)->ismaximizescreen ||                             \
@@ -1556,6 +1558,7 @@ void set_float_malposition(Client *tc) {
 }
 
 void client_reset_mon_tags(Client *c, Monitor *mon, uint32_t newtags) {
+	newtags &= effective_tagmask;
 	if (!newtags && mon && !mon->isoverview) {
 		c->tags = mon->tagset[mon->seltags];
 	} else if (!newtags && mon && mon->isoverview) {
@@ -3305,7 +3308,7 @@ void createmon(struct wl_listener *listener, void *data) {
 
 	if (chvt_backup_tag &&
 		regex_match(chvt_backup_selmon, m->wlr_output->name)) {
-		m->tagset[0] = m->tagset[1] = (1 << (chvt_backup_tag - 1)) & TAGMASK;
+		m->tagset[0] = m->tagset[1] = (1 << (chvt_backup_tag - 1)) & effective_tagmask;
 		m->pertag->curtag = m->pertag->prevtag = chvt_backup_tag;
 		chvt_backup_tag = 0;
 		memset(chvt_backup_selmon, 0, sizeof(chvt_backup_selmon));
@@ -3354,7 +3357,7 @@ void createmon(struct wl_listener *listener, void *data) {
 		ext_manager, EXT_WORKSPACE_ENABLE_CAPS);
 	wlr_ext_workspace_group_handle_v1_output_enter(m->ext_group, m->wlr_output);
 
-	for (i = 1; i <= LENGTH(tags); i++) {
+	for (i = 1; i <= effective_tags; i++) {
 		add_workspace_by_tag(i, m);
 	}
 
@@ -6046,9 +6049,9 @@ void startdrag(struct wl_listener *listener, void *data) {
 
 void tag_client(const Arg *arg, Client *target_client) {
 	Client *fc = NULL;
-	if (target_client && arg->ui & TAGMASK) {
+	if (target_client && arg->ui & effective_tagmask) {
 
-		target_client->tags = arg->ui & TAGMASK;
+		target_client->tags = arg->ui & effective_tagmask;
 		target_client->istagswitching = 1;
 
 		wl_list_for_each(fc, &clients, link) {
@@ -6146,7 +6149,7 @@ void overview_restore(Client *c, const Arg *arg) {
 	c->geom = c->overview_backup_geom;
 	c->bw = c->overview_backup_bw;
 	c->animation.tagining = false;
-	c->is_restoring_from_ov = (arg->ui & c->tags & TAGMASK) == 0 ? true : false;
+	c->is_restoring_from_ov = (arg->ui & c->tags & effective_tagmask) == 0 ? true : false;
 
 	if (c->overview_scene_surface) {
 		wlr_scene_node_destroy(&c->scene_surface->node);
@@ -6557,11 +6560,11 @@ void view_in_mon(const Arg *arg, bool want_animation, Monitor *m,
 				 bool changefocus) {
 	uint32_t i, tmptag;
 
-	if (!m || (arg->ui != (~0 & TAGMASK) && m->isoverview)) {
+	if (!m || (arg->ui != (~0 & effective_tagmask) && m->isoverview)) {
 		return;
 	}
 
-	if (arg->ui == 0) {
+	if ((arg->ui & effective_tagmask) == 0) {
 		return;
 	}
 
@@ -6576,23 +6579,23 @@ void view_in_mon(const Arg *arg, bool want_animation, Monitor *m,
 		}
 	}
 
-	if ((m->tagset[m->seltags] & arg->ui & TAGMASK) != 0) {
+	if ((m->tagset[m->seltags] & arg->ui & effective_tagmask) != 0) {
 		want_animation = false;
 	}
 
 	m->seltags ^= 1; /* toggle sel tagset */
 
-	if (arg->ui & TAGMASK) {
-		m->tagset[m->seltags] = arg->ui & TAGMASK;
+	if (arg->ui & effective_tagmask) {
+		m->tagset[m->seltags] = arg->ui & effective_tagmask;
 		tmptag = m->pertag->curtag;
 
-		if (arg->ui == (~0 & TAGMASK))
+		if (arg->ui == (~0 & effective_tagmask))
 			m->pertag->curtag = 0;
 		else {
-			for (i = 0; !(arg->ui & 1 << i) && i < LENGTH(tags) && arg->ui != 0;
+			for (i = 0; !(arg->ui & 1 << i) && i < effective_tags && arg->ui != 0;
 				 i++)
 				;
-			m->pertag->curtag = i >= LENGTH(tags) ? LENGTH(tags) : i + 1;
+			m->pertag->curtag = i >= effective_tags ? effective_tags : i + 1;
 		}
 
 		m->pertag->prevtag =

@@ -38,7 +38,7 @@ uint32_t get_tag_status(uint32_t tag, Monitor *m) {
 	Client *c = NULL;
 	uint32_t status = 0;
 	wl_list_for_each(c, &clients, link) {
-		if (c->mon == m && c->tags & 1 << (tag - 1) & TAGMASK) {
+		if (c->mon == m && c->tags & 1 << (tag - 1) & effective_tagmask) {
 			if (c->isurgent) {
 				status = 2;
 				break;
@@ -57,14 +57,14 @@ uint32_t get_tags_first_tag_num(uint32_t source_tags) {
 		return 0;
 	}
 
-	for (i = 0; !(tag & 1) && source_tags != 0 && i < LENGTH(tags); i++) {
+	for (i = 0; !(tag & 1) && source_tags != 0 && i < effective_tags; i++) {
 		tag = source_tags >> i;
 	}
 
 	if (i == 1) {
 		return 1;
-	} else if (i > 9) {
-		return 9;
+	} else if (i > effective_tags) {
+		return effective_tags;
 	} else {
 		return i;
 	}
@@ -79,14 +79,14 @@ uint32_t get_tags_first_tag(uint32_t source_tags) {
 		return selmon->pertag->curtag;
 	}
 
-	for (i = 0; !(tag & 1) && source_tags != 0 && i < LENGTH(tags); i++) {
+	for (i = 0; !(tag & 1) && source_tags != 0 && i < effective_tags; i++) {
 		tag = source_tags >> i;
 	}
 
 	if (i == 1) {
 		return 1;
-	} else if (i > 9) {
-		return 1 << 8;
+	} else if (i > effective_tags) {
+		return 1 << (effective_tags - 1);
 	} else {
 		return 1 << (i - 1);
 	}

@@ -169,7 +169,7 @@ void dwl_ext_workspace_printstatus(Monitor *m) {
 				}
 			}
 
-			if ((m->tagset[m->seltags] & (1 << (w->tag - 1)) & TAGMASK) ||
+			if ((m->tagset[m->seltags] & (1 << (w->tag - 1)) & effective_tagmask) ||
 				m->isoverview) {
 				wlr_ext_workspace_handle_v1_set_hidden(w->ext_workspace, false);
 				wlr_ext_workspace_handle_v1_set_active(w->ext_workspace, true);
@@ -184,13 +184,13 @@ void refresh_monitors_workspaces_status(Monitor *m) {
 	int32_t i;
 
 	if (m->isoverview) {
-		for (i = 1; i <= LENGTH(tags); i++) {
+		for (i = 1; i <= effective_tags; i++) {
 			remove_workspace_by_tag(i, m);
 		}
 		add_workspace_by_tag(0, m);
 	} else {
 		remove_workspace_by_tag(0, m);
-		for (i = 1; i <= LENGTH(tags); i++) {
+		for (i = 1; i <= effective_tags; i++) {
 			add_workspace_by_tag(i, m);
 		}
 	}
