@@ -15,8 +15,9 @@ void set_tagin_animation(Monitor *m, Client *c) {
 		return;
 	}
 
-	bool going_forward = m->carousel_anim_dir ? m->carousel_anim_dir > 0
-											  : m->pertag->curtag > m->pertag->prevtag;
+	bool going_forward = m->carousel_anim_dir
+							 ? m->carousel_anim_dir > 0
+							 : m->pertag->curtag > m->pertag->prevtag;
 
 	if (going_forward) {
 
@@ -49,7 +50,6 @@ void set_arrange_visible(Monitor *m, Client *c, bool want_animation) {
 		wlr_scene_node_set_enabled(&c->scene->node, true);
 		wlr_scene_node_set_enabled(&c->scene_surface->node, true);
 	}
-	client_set_suspended(c, false);
 
 	if (!c->animation.tag_from_rule && want_animation &&
 		m->pertag->prevtag != 0 && m->pertag->curtag != 0 &&
@@ -79,8 +79,9 @@ void set_tagout_animation(Monitor *m, Client *c) {
 		return;
 	}
 
-	bool going_forward = m->carousel_anim_dir ? m->carousel_anim_dir > 0
-											  : m->pertag->curtag > m->pertag->prevtag;
+	bool going_forward = m->carousel_anim_dir
+							 ? m->carousel_anim_dir > 0
+							 : m->pertag->curtag > m->pertag->prevtag;
 	if (going_forward) {
 		c->pending = c->geom;
 		c->pending.x =
@@ -117,6 +118,5 @@ void set_arrange_hidden(Monitor *m, Client *c, bool want_animation) {
 		set_tagout_animation(m, c);
 	} else {
 		wlr_scene_node_set_enabled(&c->scene->node, false);
-		client_set_suspended(c, true);
 	}
 }

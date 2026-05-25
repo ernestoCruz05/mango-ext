@@ -1107,7 +1107,7 @@ void reset_size_per_mon(Monitor *m, int32_t tile_cilent_num,
 	if (m->pertag->ltidxs[m->pertag->curtag]->id != CENTER_TILE) {
 
 		wl_list_for_each(c, &clients, link) {
-			if (VISIBLEON(c, m) && ISTILED(c)) {
+			if (VISIBLEON(c, m) && ISFAKETILED(c)) {
 
 				if (total_master_inner_percent > 0.0 && i < nmasters) {
 					c->ismaster = true;
@@ -1130,7 +1130,7 @@ void reset_size_per_mon(Monitor *m, int32_t tile_cilent_num,
 		}
 	} else {
 		wl_list_for_each(c, &clients, link) {
-			if (VISIBLEON(c, m) && ISTILED(c)) {
+			if (VISIBLEON(c, m) && ISFAKETILED(c)) {
 
 				if (total_master_inner_percent > 0.0 && i < nmasters) {
 					c->ismaster = true;
@@ -1200,6 +1200,7 @@ void pre_caculate_before_arrange(Monitor *m, bool want_animation,
 	m->visible_clients = 0;
 	m->visible_tiling_clients = 0;
 	m->visible_scroll_tiling_clients = 0;
+	m->visible_fake_tiling_clients = 0;
 
 	uint32_t tag = m->pertag->curtag;
 	struct TagScrollerState *st = m->pertag->scroller_state[tag];
@@ -1243,6 +1244,10 @@ void pre_caculate_before_arrange(Monitor *m, bool want_animation,
 					m->visible_scroll_tiling_clients++;
 				}
 			}
+
+			if (ISFAKETILED(c)) {
+				m->visible_fake_tiling_clients++;
+			}
 		}
 	}
 
@@ -1254,8 +1259,7 @@ void pre_caculate_before_arrange(Monitor *m, bool want_animation,
 
 		if (c->mon == m) {
 			if (VISIBLEON(c, m)) {
-				if (ISTILED(c) && !is_canvas) {
-
+				if (ISFAKETILED(c) && !is_canvas) {
 					if (i < nmasters) {
 						master_num++;
 						total_master_inner_percent += c->master_inner_per;

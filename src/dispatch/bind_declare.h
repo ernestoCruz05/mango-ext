@@ -83,3 +83,4 @@ int32_t canvas_anchor_go(const Arg *arg);
 int32_t dwindle_toggle_split_direction(const Arg *arg);
 int32_t dwindle_split_horizontal(const Arg *arg);
 int32_t dwindle_split_vertical(const Arg *arg);
+int32_t focusid(const Arg *arg);

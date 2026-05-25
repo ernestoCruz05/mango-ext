@@ -78,7 +78,7 @@ typedef struct {
 	int32_t ignore_maximize;
 	int32_t ignore_minimize;
 	int32_t isnosizehint;
-	int32_t indleinhibit_when_focus;
+	int32_t idleinhibit_when_focus;
 	char *monitor;
 	int32_t offsetx;
 	int32_t offsety;
@@ -231,6 +231,7 @@ typedef struct {
 	int32_t scroller_prefer_center;
 	int32_t scroller_prefer_overspread;
 	int32_t edge_scroller_pointer_focus;
+	double edge_scroller_focus_allow_speed;
 	int32_t focus_cross_monitor;
 	int32_t exchange_cross_monitor;
 	int32_t scratchpad_cross_monitor;
@@ -267,10 +268,11 @@ typedef struct {
 	int32_t dwindle_manual_split;
 	float dwindle_split_ratio;
 
-	uint32_t hotarea_size;
-	uint32_t hotarea_corner;
-	uint32_t enable_hotarea;
-	uint32_t ov_tab_mode;
+	int32_t hotarea_size;
+	int32_t hotarea_corner;
+	int32_t enable_hotarea;
+	int32_t ov_tab_mode;
+	int32_t ov_no_resize;
 	int32_t overviewgappi;
 	int32_t overviewgappo;
 	uint32_t cursor_hide_timeout;
@@ -303,6 +305,7 @@ typedef struct {
 	double mouse_accel_speed;
 	double axis_scroll_factor;
 
+	/* tablet */
 	char *tablet_map_to_mon;
 
 	double touch_distance_threshold;
@@ -312,6 +315,7 @@ typedef struct {
 	double touch_edge_size_top;
 	double touch_edge_size_right;
 	double touch_edge_size_bottom;
+
 
 	/* Trackpad */
 	int32_t trackpad_natural_scrolling;
@@ -1081,6 +1085,8 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 	} else if (strcmp(func_name, "focusdir") == 0) {
 		func = focusdir;
 		(*arg).i = parse_direction(arg_value);
+	} else if (strcmp(func_name, "focusid") == 0) {
+		func = focusid;
 	} else if (strcmp(func_name, "incnmaster") == 0) {
 		func = incnmaster;
 		(*arg).i = atoi(arg_value);
@@ -1559,6 +1565,8 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->scroller_prefer_overspread = atoi(value);
 	} else if (strcmp(key, "edge_scroller_pointer_focus") == 0) {
 		config->edge_scroller_pointer_focus = atoi(value);
+	} else if (strcmp(key, "edge_scroller_focus_allow_speed") == 0) {
+		config->edge_scroller_focus_allow_speed = atof(value);
 	} else if (strcmp(key, "focus_cross_monitor") == 0) {
 		config->focus_cross_monitor = atoi(value);
 	} else if (strcmp(key, "exchange_cross_monitor") == 0) {
@@ -1822,6 +1830,8 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->enable_hotarea = atoi(value);
 	} else if (strcmp(key, "ov_tab_mode") == 0) {
 		config->ov_tab_mode = atoi(value);
+	} else if (strcmp(key, "ov_no_resize") == 0) {
+		config->ov_no_resize = atoi(value);
 	} else if (strcmp(key, "overviewgappi") == 0) {
 		config->overviewgappi = atoi(value);
 	} else if (strcmp(key, "overviewgappo") == 0) {
@@ -2324,7 +2334,7 @@ bool parse_option(Config *config, char *key, char *value) {
 		rule->ignore_maximize = -1;
 		rule->ignore_minimize = -1;
 		rule->isnosizehint = -1;
-		rule->indleinhibit_when_focus = -1;
+		rule->idleinhibit_when_focus = -1;
 		rule->isterm = -1;
 		rule->allow_csd = -1;
 		rule->force_fakemaximize = -1;
@@ -2436,8 +2446,8 @@ bool parse_option(Config *config, char *key, char *value) {
 					rule->ignore_minimize = atoi(val);
 				} else if (strcmp(key, "isnosizehint") == 0) {
 					rule->isnosizehint = atoi(val);
-				} else if (strcmp(key, "indleinhibit_when_focus") == 0) {
-					rule->indleinhibit_when_focus = atoi(val);
+				} else if (strcmp(key, "idleinhibit_when_focus") == 0) {
+					rule->idleinhibit_when_focus = atoi(val);
 				} else if (strcmp(key, "isterm") == 0) {
 					rule->isterm = atoi(val);
 				} else if (strcmp(key, "allow_csd") == 0) {
@@ -2627,6 +2637,7 @@ bool parse_option(Config *config, char *key, char *value) {
 		binding->arg.v = NULL;
 		binding->arg.v2 = NULL;
 		binding->arg.v3 = NULL;
+		binding->arg.tc = NULL;
 		binding->func =
 			parse_func_name(func_name, &binding->arg, arg_value, arg_value2,
 							arg_value3, arg_value4, arg_value5);
@@ -2708,6 +2719,7 @@ bool parse_option(Config *config, char *key, char *value) {
 		binding->arg.v = NULL;
 		binding->arg.v2 = NULL;
 		binding->arg.v3 = NULL;
+		binding->arg.tc = NULL;
 
 		// TODO: remove this in next version
 		if (binding->mod == 0 &&
@@ -2793,6 +2805,7 @@ bool parse_option(Config *config, char *key, char *value) {
 		binding->arg.v = NULL;
 		binding->arg.v2 = NULL;
 		binding->arg.v3 = NULL;
+		binding->arg.tc = NULL;
 		binding->func =
 			parse_func_name(func_name, &binding->arg, arg_value, arg_value2,
 							arg_value3, arg_value4, arg_value5);
@@ -2943,6 +2956,7 @@ bool parse_option(Config *config, char *key, char *value) {
 		binding->arg.v = NULL;
 		binding->arg.v2 = NULL;
 		binding->arg.v3 = NULL;
+		binding->arg.tc = NULL;
 		binding->func =
 			parse_func_name(func_name, &binding->arg, arg_value, arg_value2,
 							arg_value3, arg_value4, arg_value5);
@@ -3536,6 +3550,8 @@ void override_config(void) {
 		CLAMP_INT(config.scroller_prefer_overspread, 0, 1);
 	config.edge_scroller_pointer_focus =
 		CLAMP_INT(config.edge_scroller_pointer_focus, 0, 1);
+	config.edge_scroller_focus_allow_speed =
+		CLAMP_FLOAT(config.edge_scroller_focus_allow_speed, 0.0f, 1000.0f);
 	config.scroller_structs = CLAMP_INT(config.scroller_structs, 0, 1000);
 	config.default_mfact = CLAMP_FLOAT(config.default_mfact, 0.1f, 0.9f);
 	config.default_nmaster = CLAMP_INT(config.default_nmaster, 1, 1000);
@@ -3559,6 +3575,7 @@ void override_config(void) {
 	config.hotarea_corner = CLAMP_INT(config.hotarea_corner, 0, 3);
 	config.enable_hotarea = CLAMP_INT(config.enable_hotarea, 0, 1);
 	config.ov_tab_mode = CLAMP_INT(config.ov_tab_mode, 0, 1);
+	config.ov_no_resize = CLAMP_INT(config.ov_no_resize, 0, 1);
 	config.overviewgappi = CLAMP_INT(config.overviewgappi, 0, 1000);
 	config.overviewgappo = CLAMP_INT(config.overviewgappo, 0, 1000);
 	config.xwayland_persistence = CLAMP_INT(config.xwayland_persistence, 0, 1);
@@ -3723,10 +3740,11 @@ void set_value_default() {
 	config.numlockon = 0;
 	config.capslock = 0;
 
-	config.ov_tab_mode = 0;
+	config.ov_tab_mode = 1;
+	config.ov_no_resize = 1;
 	config.hotarea_size = 10;
 	config.hotarea_corner = BOTTOM_LEFT;
-	config.enable_hotarea = 1;
+	config.enable_hotarea = 0;
 	config.smartgaps = 0;
 	config.sloppyfocus = 1;
 	config.gappih = 5;
@@ -3744,6 +3762,7 @@ void set_value_default() {
 	config.scroller_prefer_center = 0;
 	config.scroller_prefer_overspread = 1;
 	config.edge_scroller_pointer_focus = 1;
+	config.edge_scroller_focus_allow_speed = 0.0f;
 	config.focus_cross_monitor = 0;
 	config.exchange_cross_monitor = 0;
 	config.scratchpad_cross_monitor = 0;
@@ -3761,6 +3780,7 @@ void set_value_default() {
 	config.single_scratchpad = 1;
 	config.xwayland_persistence = 1;
 	config.syncobj_enable = 0;
+	config.tag_carousel = 0;
 	config.drag_tile_refresh_interval = 8.0f;
 	config.drag_floating_refresh_interval = 8.0f;
 	config.allow_tearing = TEARING_DISABLED;

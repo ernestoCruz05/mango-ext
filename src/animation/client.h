@@ -80,6 +80,14 @@ int32_t is_special_animation_rule(Client *c) {
 	}
 }
 
+void set_overview_enter_animation(Client *c) {
+	struct wlr_box geo = c->geom;
+	c->animainit_geom.width = geo.width * 1.2;
+	c->animainit_geom.height = geo.height * 1.2;
+	c->animainit_geom.x = geo.x + (geo.width - c->animainit_geom.width) / 2;
+	c->animainit_geom.y = geo.y + (geo.height - c->animainit_geom.height) / 2;
+}
+
 void set_client_open_animation(Client *c, struct wlr_box geo) {
 	int32_t slide_direction;
 	int32_t horizontal, horizontal_value;
@@ -435,6 +443,39 @@ static float get_client_effective_zoom(Client *c) {
 	return 1.0f;
 }
 
+void scene_buffer_apply_overview_effect(struct wlr_scene_buffer *buffer,
+										int32_t sx, int32_t sy, void *data) {
+	BufferData *buffer_data = (BufferData *)data;
+
+	int32_t surface_width = 0;
+	int32_t surface_height = 0;
+	bool is_subsurface = false;
+
+	struct wlr_scene_tree *parent_tree = buffer->node.parent;
+	if (parent_tree->node.data != NULL) {
+		SnapshotMetadata *meta = (SnapshotMetadata *)parent_tree->node.data;
+		surface_width = meta->orig_width;
+		surface_height = meta->orig_height;
+		is_subsurface = meta->is_subsurface;
+	}
+
+	surface_height = surface_height * buffer_data->height_scale;
+	surface_width = surface_width * buffer_data->width_scale;
+
+	if (is_subsurface && surface_width > 0 && surface_height > 0) {
+		wlr_scene_buffer_set_dest_size(buffer, surface_width, surface_height);
+	} else if (buffer_data->height > 0 && buffer_data->width > 0) {
+		wlr_scene_buffer_set_dest_size(buffer, buffer_data->width,
+									   buffer_data->height);
+	}
+
+	if (is_subsurface)
+		return;
+
+	wlr_scene_buffer_set_corner_radius(buffer, config.border_radius,
+									   buffer_data->corner_location);
+}
+
 void buffer_set_effect(Client *c, BufferData data) {
 
 	if (!c || c->iskilling)
@@ -454,8 +495,13 @@ void buffer_set_effect(Client *c, BufferData data) {
 		data.corner_location = CORNER_LOCATION_NONE;
 	}
 
-	wlr_scene_node_for_each_buffer(&c->scene_surface->node,
-								   scene_buffer_apply_effect, &data);
+	if (c->overview_scene_surface) {
+		wlr_scene_node_for_each_buffer(
+			&c->scene_surface->node, scene_buffer_apply_overview_effect, &data);
+	} else {
+		wlr_scene_node_for_each_buffer(&c->scene_surface->node,
+									   scene_buffer_apply_effect, &data);
+	}
 }
 
 void client_draw_shadow(Client *c) {
@@ -1009,7 +1055,7 @@ void client_apply_clip(Client *c, float factor) {
 	enum corner_location current_corner_location =
 		set_client_corner_location(c);
 
-	if (!config.animations) {
+	if (!config.animations && !c->overview_scene_surface) {
 		c->animation.running = false;
 		c->need_output_flush = false;
 		c->animainit_geom = c->current = c->pending = c->animation.current =
@@ -1049,8 +1095,10 @@ void client_apply_clip(Client *c, float factor) {
 			}
 		}
 
-		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node,
-										   &clip_box);
+		if (!c->overview_scene_surface) {
+			wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node,
+											   &clip_box);
+		}
 		buffer_set_effect(c, (BufferData){1.0f, 1.0f, clip_box.width,
 										  clip_box.height,
 										  current_corner_location, true});
@@ -1119,7 +1167,9 @@ void client_apply_clip(Client *c, float factor) {
 	}
 
 	// 应用窗口表面剪切
-	wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, &clip_box);
+	if (!c->overview_scene_surface) {
+		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, &clip_box);
+	}
 
 	// 获取剪切后的表面的实际大小用于计算缩放
 	int32_t acutal_surface_width = geometry.width - offset.x - offset.width;
@@ -1134,7 +1184,7 @@ void client_apply_clip(Client *c, float factor) {
 	buffer_data.height = clip_box.height;
 	buffer_data.corner_location = current_corner_location;
 
-	if (factor == 1.0) {
+	if (factor == 1.0 && !c->overview_scene_surface) {
 		buffer_data.width_scale = 1.0;
 		buffer_data.height_scale = 1.0;
 	} else {
@@ -1266,11 +1316,11 @@ void client_animation_next_tick(Client *c) {
 
 		c->animation.tagining = false;
 		c->animation.running = false;
+		c->animation.overining = false;
 
 		if (c->animation.tagouting) {
 			c->animation.tagouting = false;
 			wlr_scene_node_set_enabled(&c->scene->node, false);
-			client_set_suspended(c, true);
 			c->animation.tagouted = true;
 			c->animation.current = c->geom;
 		}
@@ -1310,6 +1360,10 @@ void init_fadeout_client(Client *c) {
 
 	wlr_scene_node_set_enabled(&c->scene->node, true);
 	client_set_border_color(c, config.bordercolor);
+	if (c->overview_scene_surface) {
+		wlr_scene_node_destroy(&c->overview_scene_surface->node);
+		c->overview_scene_surface = NULL;
+	}
 	fadeout_client->scene =
 		wlr_scene_tree_snapshot(&c->scene->node, layers[LyrFadeOut]);
 	wlr_scene_node_set_enabled(&c->scene->node, false);
@@ -1404,9 +1458,8 @@ void client_set_pending_state(Client *c) {
 		c->animation.should_animate = false;
 	} else if (config.animations && c->animation.tagining) {
 		c->animation.should_animate = true;
-	} else if (!config.animations || c == grabc ||
-			   (!c->is_pending_open_animation &&
-				wlr_box_equal(&c->current, &c->pending))) {
+	} else if (c == grabc || (!c->is_pending_open_animation &&
+							  wlr_box_equal(&c->current, &c->pending))) {
 		c->animation.should_animate = false;
 	} else {
 		c->animation.should_animate = true;
@@ -1481,8 +1534,11 @@ void resize(Client *c, struct wlr_box geo, int32_t interact) {
 		c->animation.begin_fade_in = false;
 	}
 
-	if (c->animation.action == OPEN && !c->animation.tagining &&
-		!c->animation.tagouting && wlr_box_equal(&c->geom, &c->current)) {
+	if (c->animation.overining) {
+		c->animation.action = OVERVIEW;
+	} else if (c->animation.action == OPEN && !c->animation.tagining &&
+			   !c->animation.tagouting &&
+			   wlr_box_equal(&c->geom, &c->current)) {
 		c->animation.action = c->animation.action;
 	} else if (c->animation.tagouting) {
 		c->animation.duration = config.animation_duration_tag;
@@ -1521,8 +1577,10 @@ void resize(Client *c, struct wlr_box geo, int32_t interact) {
 	}
 
 	// c->geom 是真实的窗口大小和位置，跟过度的动画无关，用于计算布局
-	c->configure_serial = client_set_size(c, c->geom.width - 2 * c->bw,
-										  c->geom.height - 2 * c->bw);
+	if (!c->mon->isoverview || !config.ov_no_resize) {
+		c->configure_serial = client_set_size(c, c->geom.width - 2 * c->bw,
+											  c->geom.height - 2 * c->bw);
+	}
 
 	if (c->configure_serial != 0) {
 		c->mon->resizing_count_pending++;
@@ -1562,6 +1620,15 @@ void resize(Client *c, struct wlr_box geo, int32_t interact) {
 	}
 
 	if (c->scratchpad_switching_mon && c->isfloating) {
+		c->animainit_geom = c->geom;
+	}
+
+	if (config.animations && config.ov_no_resize && c->mon->isoverview &&
+		c != c->mon->sel && c->animation.action == OVERVIEW) {
+		set_overview_enter_animation(c);
+	}
+
+	if (!config.animations && config.ov_no_resize && c->mon->isoverview) {
 		c->animainit_geom = c->geom;
 	}
 

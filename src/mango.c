@@ -118,6 +118,9 @@
 #define ISSCROLLTILED(A)                                                       \
 	(A && !(A)->isfloating && !(A)->isminimized && !(A)->iskilling &&          \
 	 !(A)->isunglobal)
+#define ISFAKETILED(A)                                                         \
+	(A && !(A)->isfloating && !(A)->isminimized && !(A)->iskilling &&          \
+	 !(A)->isunglobal)
 #define VISIBLEON(C, M)                                                        \
 	((C) && (M) && (C)->mon == (M) &&                                          \
 	 (((C)->tags & (M)->tagset[(M)->seltags] || (C)->isglobal ||               \
@@ -210,7 +213,7 @@ enum {
 }; /* EWMH atoms */
 #endif
 enum { UP, DOWN, LEFT, RIGHT, UNDIR }; /* smartmovewin */
-enum { NONE, OPEN, MOVE, CLOSE, TAG, FOCUS, OPAFADEIN, OPAFADEOUT, CANVAS_PAN, CANVAS_ZOOM };
+enum { NONE, OPEN, MOVE, CLOSE, TAG, FOCUS, OPAFADEIN, OPAFADEOUT, CANVAS_PAN, CANVAS_ZOOM, OVERVIEW };
 enum { UNFOLD, FOLD, INVALIDFOLD };
 enum { PREV, NEXT };
 enum { STATE_UNSPECIFIED = 0, STATE_ENABLED, STATE_DISABLED };
@@ -224,28 +227,6 @@ enum tearing_mode {
 enum seat_config_shortcuts_inhibit {
 	SHORTCUTS_INHIBIT_DISABLE,
 	SHORTCUTS_INHIBIT_ENABLE,
-};
-
-// 事件掩码枚举
-enum print_event_type {
-	PRINT_ACTIVE = 1 << 0,
-	PRINT_TAG = 1 << 1,
-	PRINT_LAYOUT = 1 << 2,
-	PRINT_TITLE = 1 << 3,
-	PRINT_APPID = 1 << 4,
-	PRINT_LAYOUT_SYMBOL = 1 << 5,
-	PRINT_FULLSCREEN = 1 << 6,
-	PRINT_FLOATING = 1 << 7,
-	PRINT_X = 1 << 8,
-	PRINT_Y = 1 << 9,
-	PRINT_WIDTH = 1 << 10,
-	PRINT_HEIGHT = 1 << 11,
-	PRINT_LAST_LAYER = 1 << 12,
-	PRINT_KB_LAYOUT = 1 << 13,
-	PRINT_KEYMODE = 1 << 14,
-	PRINT_SCALEFACTOR = 1 << 15,
-	PRINT_FRAME = 1 << 16,
-	PRINT_ALL = (1 << 17) - 1 // 所有位都设为1
 };
 
 typedef struct Pertag Pertag;
@@ -270,6 +251,7 @@ typedef struct {
 	char *v3;
 	uint32_t ui;
 	uint32_t ui2;
+	Client *tc;
 } Arg;
 
 typedef struct {
@@ -314,6 +296,7 @@ struct dwl_animation {
 	bool tagouting;
 	bool begin_fade_in;
 	bool tag_from_rule;
+	bool overining;
 	uint32_t time_started;
 	uint32_t duration;
 	struct wlr_box initial;
@@ -356,6 +339,7 @@ struct Client {
 	struct wlr_scene_rect *splitindicator[4];
 	struct wlr_scene_shadow *shadow;
 	struct wlr_scene_tree *scene_surface;
+	struct wlr_scene_tree *overview_scene_surface;
 	struct wl_list link;
 	struct wl_list flink;
 	struct wl_list fadeout_link;
@@ -387,7 +371,7 @@ struct Client {
 	struct wlr_foreign_toplevel_handle_v1 *foreign_toplevel;
 	int32_t isfloating, isurgent, isfullscreen, isfakefullscreen,
 		need_float_size_reduce, isminimized, isoverlay, isnosizehint,
-		ignore_maximize, ignore_minimize, indleinhibit_when_focus;
+		ignore_maximize, ignore_minimize, idleinhibit_when_focus;
 	int32_t ismaximizescreen;
 	int32_t overview_backup_bw;
 	int32_t fullscreen_backup_x, fullscreen_backup_y, fullscreen_backup_w,
@@ -472,6 +456,7 @@ struct Client {
 	float old_grid_row_per;
 	int32_t grid_col_idx;
 	int32_t grid_row_idx;
+	uint32_t id;
 };
 
 typedef struct {
@@ -623,8 +608,9 @@ struct Monitor {
 	uint32_t visible_clients;
 	uint32_t visible_tiling_clients;
 	uint32_t visible_scroll_tiling_clients;
+	uint32_t visible_fake_tiling_clients;
 	struct wlr_scene_optimized_blur *blur;
-	char last_surface_ws_name[256];
+	char last_open_surface[256];
 	struct wlr_ext_workspace_group_handle_v1 *ext_group;
 	bool canvas_in_overview;
 	float canvas_saved_pan_x;
@@ -681,6 +667,13 @@ struct TagScrollerState {
 	struct ScrollerStackNode *all_first; /* 所有节点的单链表头 */
 	int count;
 };
+
+typedef struct {
+	int32_t orig_width;
+	int32_t orig_height;
+	bool is_subsurface;
+	struct wl_listener destroy;
+} SnapshotMetadata;
 
 /* function declarations */
 static void applybounds(
@@ -933,7 +926,8 @@ static Client *find_client_by_direction(Client *tc, const Arg *arg,
 static void exit_scroller_stack(Client *c);
 static Client *scroll_get_stack_head_client(Client *c);
 static bool client_only_in_one_tag(Client *c);
-static Client *get_focused_stack_client(Client *sc);
+static Client *get_focused_stack_client(Client *sc,
+										Client *custom_focus_client);
 static bool client_is_in_same_stack(Client *sc, Client *tc, Client *fc);
 static void monitor_stop_skip_frame_timer(Monitor *m);
 static int monitor_skip_frame_timeout_callback(void *data);
@@ -967,6 +961,7 @@ scroller_node_create(struct TagScrollerState *st, Client *c);
 static void update_scroller_state(Monitor *m);
 Client *scroll_get_stack_tail_client(Client *c);
 static DwindleNode *dwindle_find_leaf(DwindleNode *node, Client *c);
+static void overview_backup_surface(Client *c);
 
 #include "data/static_keymap.h"
 #include "dispatch/bind_declare.h"
@@ -985,7 +980,7 @@ static struct wlr_scene_tree *minimap_scene_tree = NULL;
 
 static struct wlr_scene_tree *overview_scene_tree = NULL;
 static int overview_canvas_min_x = 0, overview_canvas_min_y = 0;
-static float overview_scale = 1.0f;
+static float canvas_overview_scale = 1.0f;
 static bool overview_built = false;
 static struct wlr_scene_rect *overview_vp_rects[4] = {
 	NULL}; // top, bot, left, right
@@ -1097,6 +1092,7 @@ static char *env_vars[] = {"DISPLAY",
 						   "XDG_SESSION_TYPE",
 						   "XCURSOR_THEME",
 						   "XCURSOR_SIZE",
+						   "MANGO_INSTANCE_SIGNATURE",
 						   NULL};
 static struct {
 	enum wp_cursor_shape_device_v1_shape shape;
@@ -1193,6 +1189,7 @@ static struct wlr_xwayland *xwayland;
 static struct wl_event_source *sync_keymap;
 #endif
 
+#include "action/client.h"
 #include "animation/client.h"
 #include "animation/common.h"
 #include "animation/layer.h"
@@ -1203,12 +1200,14 @@ static void canvas_pan_to_client(Monitor *m, Client *c);
 #include "layout/canvas.h"
 #include "layout/dwindle.h"
 #include "layout/horizontal.h"
+#include "layout/overview.h"
 #include "layout/scroll.h"
 #include "layout/vertical.h"
 #include "dispatch/bind_define.h"
 #include "dispatch/gesture.h"
 #include "ext-protocol/all.h"
 #include "fetch/fetch.h"
+#include "ipc/ipc.h"
 
 void client_change_mon(Client *c, Monitor *m) {
 	setmon(c, m, c->tags, true);
@@ -1355,9 +1354,20 @@ void swallow(Client *c, Client *w) {
 	c->master_mfact_per = w->master_mfact_per;
 	c->scroller_proportion = w->scroller_proportion;
 	c->isglobal = w->isglobal;
+	c->overview_backup_geom = w->overview_backup_geom;
 
 	/* 调整 w 的邻居指针，让它们指向 c */
 	c->stack_proportion = w->stack_proportion;
+
+	if (w->overview_scene_surface) {
+		wlr_scene_node_destroy(&w->scene_surface->node);
+		w->scene_surface = w->overview_scene_surface;
+		w->overview_scene_surface = NULL;
+	}
+
+	if (c->mon && c->mon->isoverview && config.ov_no_resize) {
+		overview_backup_surface(c);
+	}
 
 	/* 全局链表替换 */
 	wl_list_insert(&w->link, &c->link);
@@ -1650,7 +1660,7 @@ static void apply_rule_properties(Client *c, const ConfigWinRule *r) {
 	APPLY_INT_PROP(c, r, ignore_maximize);
 	APPLY_INT_PROP(c, r, ignore_minimize);
 	APPLY_INT_PROP(c, r, isnosizehint);
-	APPLY_INT_PROP(c, r, indleinhibit_when_focus);
+	APPLY_INT_PROP(c, r, idleinhibit_when_focus);
 	APPLY_INT_PROP(c, r, isunglobal);
 	APPLY_INT_PROP(c, r, noblur);
 	APPLY_INT_PROP(c, r, canvas_notile);
@@ -2772,6 +2782,7 @@ void cleanuplisteners(void) {
 }
 
 void cleanup(void) {
+	ipc_cleanup();
 	cleanuplisteners();
 #ifdef XWAYLAND
 	wlr_xwayland_destroy(xwayland);
@@ -2929,9 +2940,9 @@ void maplayersurfacenotify(struct wl_listener *listener, void *data) {
 
 	if (!l->mon)
 		return;
-	strncpy(l->mon->last_surface_ws_name, layer_surface->namespace,
-			sizeof(l->mon->last_surface_ws_name) - 1); // 最多拷贝255个字符
-	l->mon->last_surface_ws_name[sizeof(l->mon->last_surface_ws_name) - 1] =
+	strncpy(l->mon->last_open_surface, layer_surface->namespace,
+			sizeof(l->mon->last_open_surface) - 1); // 最多拷贝255个字符
+	l->mon->last_open_surface[sizeof(l->mon->last_open_surface) - 1] =
 		'\0'; // 确保字符串以null结尾
 
 	// 初始化几何位置
@@ -3536,6 +3547,7 @@ void createmon(struct wl_listener *listener, void *data) {
 	m->skiping_frame = false;
 	m->resizing_count_pending = 0;
 	m->resizing_count_current = 0;
+	m->carousel_anim_dir = 0;
 
 	m->wlr_output = wlr_output;
 	m->wlr_output->data = m;
@@ -4615,6 +4627,7 @@ static void iter_xdg_scene_buffers(struct wlr_scene_buffer *buffer, int32_t sx,
 void init_client_properties(Client *c) {
 	c->grid_col_per = 1.0f;
 	c->grid_row_per = 1.0f;
+	c->overview_scene_surface = NULL;
 	c->drop_direction = UNDIR;
 	c->enable_drop_area_draw = false;
 	c->isfocusing = false;
@@ -4685,7 +4698,7 @@ void init_client_properties(Client *c) {
 	c->force_tiled_state = 1;
 	c->force_tearing = 0;
 	c->allow_shortcuts_inhibit = SHORTCUTS_INHIBIT_ENABLE;
-	c->indleinhibit_when_focus = 0;
+	c->idleinhibit_when_focus = 0;
 	c->scroller_proportion_single = 0.0f;
 	c->float_geom.width = 0;
 	c->float_geom.height = 0;
@@ -4707,6 +4720,9 @@ mapnotify(struct wl_listener *listener, void *data) {
 	Client *at_client = NULL;
 	Client *c = wl_container_of(listener, c, map);
 	int32_t i = 0;
+
+	c->id = generate_client_id();
+
 	/* Create scene tree for this client and its border */
 	c->scene = client_surface(c)->data = wlr_scene_tree_create(layers[LyrTile]);
 	wlr_scene_node_set_enabled(&c->scene->node, c->type != XDGShell);
@@ -4740,6 +4756,7 @@ mapnotify(struct wl_listener *listener, void *data) {
 	// init client geom
 	c->geom.width += 2 * c->bw;
 	c->geom.height += 2 * c->bw;
+	c->overview_backup_geom = c->geom;
 
 	/* Handle unmanaged clients first so we can return prior create borders
 	 */
@@ -4825,9 +4842,14 @@ mapnotify(struct wl_listener *listener, void *data) {
 	// apply buffer effects of client
 	wlr_scene_node_for_each_buffer(&c->scene_surface->node,
 								   iter_xdg_scene_buffers, c);
+	wlr_scene_node_set_position(&c->scene_surface->node, c->bw, c->bw);
 
 	// set border color
 	setborder_color(c);
+
+	if (c->mon->isoverview && config.ov_no_resize) {
+		overview_backup_surface(c);
+	}
 
 	// make sure the animation is open type
 	c->is_pending_open_animation = true;
@@ -5199,14 +5221,22 @@ void motionnotify(uint32_t time, struct wlr_input_device *device, double dx,
 	}
 
 	should_lock = false;
+	double speed = 0.0f;
+
+	if (config.edge_scroller_pointer_focus) {
+		speed = sqrt(dx * dx + dy * dy);
+	}
+
 	if (!scroller_focus_lock || !(c && c->mon && !INSIDEMON(c))) {
 		if (c && c->mon && is_scroller_layout(c->mon) && !INSIDEMON(c)) {
 			should_lock = true;
 		}
 
-		if (!(!config.edge_scroller_pointer_focus && c && c->mon &&
-			  is_scroller_layout(c->mon) && !INSIDEMON(c)))
+		if (!((!config.edge_scroller_pointer_focus ||
+			   speed < config.edge_scroller_focus_allow_speed) &&
+			  c && c->mon && is_scroller_layout(c->mon) && !INSIDEMON(c))) {
 			pointerfocus(c, surface, sx, sy, time);
+		}
 
 		if (should_lock && c && c->mon && ISTILED(c) && c == c->mon->sel) {
 			scroller_focus_lock = 1;
@@ -5312,7 +5342,8 @@ void pointerfocus(Client *c, struct wlr_surface *surface, double sx, double sy,
 
 	if (config.sloppyfocus && !start_drag_window && c && time && c->scene &&
 		c->scene->node.enabled && !c->animation.tagining &&
-		(surface != seat->pointer_state.focused_surface) &&
+		(surface != seat->pointer_state.focused_surface ||
+		 (selmon && selmon->isoverview && selmon->sel != c)) &&
 		!client_is_unmanaged(c) && VISIBLEON(c, c->mon))
 		focusclient(c, 0);
 
@@ -5843,16 +5874,16 @@ void rendermon(struct wl_listener *listener, void *data) {
 			float cx = cursor->x - overview_tree_x;
 			float cy = cursor->y - overview_tree_y;
 			if (cx >= 0 && cx < m->m.width && cy >= 0 && cy < m->m.height) {
-				float canvas_cx = cx / overview_scale + overview_canvas_min_x;
-				float canvas_cy = cy / overview_scale + overview_canvas_min_y;
+				float canvas_cx = cx / canvas_overview_scale + overview_canvas_min_x;
+				float canvas_cy = cy / canvas_overview_scale + overview_canvas_min_y;
 				pan_x = canvas_cx - (m->w.width / zoom) / 2.0f;
 				pan_y = canvas_cy - (m->w.height / zoom) / 2.0f;
 			}
 
-			int vp_x = (int)((pan_x - overview_canvas_min_x) * overview_scale);
-			int vp_y = (int)((pan_y - overview_canvas_min_y) * overview_scale);
-			int vp_w = (int)((m->w.width / zoom) * overview_scale);
-			int vp_h = (int)((m->w.height / zoom) * overview_scale);
+			int vp_x = (int)((pan_x - overview_canvas_min_x) * canvas_overview_scale);
+			int vp_y = (int)((pan_y - overview_canvas_min_y) * canvas_overview_scale);
+			int vp_w = (int)((m->w.width / zoom) * canvas_overview_scale);
+			int vp_h = (int)((m->w.height / zoom) * canvas_overview_scale);
 			if (vp_w < 8)
 				vp_w = 8;
 			if (vp_h < 8)
@@ -6079,7 +6110,7 @@ void rendermon(struct wl_listener *listener, void *data) {
 
 		overview_canvas_min_x = min_x;
 		overview_canvas_min_y = min_y;
-		overview_scale = scale;
+		canvas_overview_scale = scale;
 		overview_tree_x = tree_x;
 		overview_tree_y = tree_y;
 
@@ -6158,210 +6189,35 @@ void setborder_color(Client *c) {
 }
 
 void exchange_two_client(Client *c1, Client *c2) {
-	Monitor *tmp_mon = NULL;
-	uint32_t tmp_tags;
-	double master_inner_per = 0.0f;
-	double master_mfact_per = 0.0f;
-	double stack_inner_per = 0.0f;
-	struct ScrollerStackNode *n1 = NULL;
-	struct ScrollerStackNode *n2 = NULL;
-	struct TagScrollerState *st1 = NULL;
-	struct TagScrollerState *st2 = NULL;
-
 	if (c1 == NULL || c2 == NULL ||
 		(!config.exchange_cross_monitor && c1->mon != c2->mon)) {
 		return;
 	}
 
-	master_inner_per = c1->master_inner_per;
-	master_mfact_per = c1->master_mfact_per;
-	stack_inner_per = c1->stack_inner_per;
-	c1->master_inner_per = c2->master_inner_per;
-	c1->master_mfact_per = c2->master_mfact_per;
-	c1->stack_inner_per = c2->stack_inner_per;
-	c2->master_inner_per = master_inner_per;
-	c2->master_mfact_per = master_mfact_per;
-	c2->stack_inner_per = stack_inner_per;
-
-	bool c1_scroller = c1->mon && is_scroller_layout(c1->mon);
-	bool c2_scroller = c2->mon && is_scroller_layout(c2->mon);
 	Monitor *m1 = c1->mon;
 	Monitor *m2 = c2->mon;
-	uint32_t tag1 = m1->pertag->curtag;
-	uint32_t tag2 = m2->pertag->curtag;
+	const Layout *layout1 = m1->pertag->ltidxs[m1->pertag->curtag];
+	const Layout *layout2 = m2->pertag->ltidxs[m2->pertag->curtag];
 
-	if (c1_scroller) {
-		st1 = ensure_scroller_state(m1, tag1);
-		n1 = find_scroller_node(st1, c1);
-	}
-
-	if (c2_scroller) {
-		st2 = ensure_scroller_state(m2, tag2);
-		n2 = find_scroller_node(st2, c2);
-	}
-
-	if (!n1 || !n2)
-		goto exchange_common;
-
-	if (n1 && n2) {
-
-		/* 跨显示器且任一方有堆叠关系时不允许交换 */
-		if (m1 != m2 && (n1->prev_in_stack || n2->prev_in_stack ||
-						 n1->next_in_stack || n2->next_in_stack))
-			return;
-
-		/* 获取各自的堆叠头节点 */
-		struct ScrollerStackNode *head1 = n1;
-		while (head1->prev_in_stack)
-			head1 = head1->prev_in_stack;
-		struct ScrollerStackNode *head2 = n2;
-		while (head2->prev_in_stack)
-			head2 = head2->prev_in_stack;
-
-		/* 同一堆叠内交换 */
-		if (head1 == head2) {
-			float tmp_scroller = n1->scroller_proportion;
-			float tmp_stack = n1->stack_proportion;
-			n1->scroller_proportion = n2->scroller_proportion;
-			n1->stack_proportion = n2->stack_proportion;
-			n2->scroller_proportion = tmp_scroller;
-			n2->stack_proportion = tmp_stack;
-
-			/* 交换堆叠链表指针 */
-			struct ScrollerStackNode *p1 = n1->prev_in_stack;
-			struct ScrollerStackNode *next1 = n1->next_in_stack;
-			struct ScrollerStackNode *p2 = n2->prev_in_stack;
-			struct ScrollerStackNode *next2 = n2->next_in_stack;
-
-			if (n1->next_in_stack == n2) {
-				n1->next_in_stack = next2;
-				n2->prev_in_stack = p1;
-				n1->prev_in_stack = n2;
-				n2->next_in_stack = n1;
-				if (p1)
-					p1->next_in_stack = n2;
-				if (next2)
-					next2->prev_in_stack = n1;
-			} else if (n2->next_in_stack == n1) {
-				n2->next_in_stack = next1;
-				n1->prev_in_stack = p2;
-				n2->prev_in_stack = n1;
-				n1->next_in_stack = n2;
-				if (p2)
-					p2->next_in_stack = n1;
-				if (next1)
-					next1->prev_in_stack = n2;
-			} else {
-				if (p1)
-					p1->next_in_stack = n2;
-				if (next1)
-					next1->prev_in_stack = n2;
-				if (p2)
-					p2->next_in_stack = n1;
-				if (next2)
-					next2->prev_in_stack = n1;
-				n1->prev_in_stack = p2;
-				n1->next_in_stack = next2;
-				n2->prev_in_stack = p1;
-				n2->next_in_stack = next1;
-			}
-
-			sync_scroller_state_to_clients(m1, tag1);
-			arrange(m1, false, false);
-		} else {
-			/* 不同堆叠：交换两个堆叠整体位置 */
-			if (n1 != head1 || n2 != head2) {
-				/* 当前不是头部，递归交换头部 */
-				exchange_two_client(head1->client, head2->client);
-				return;
-			}
-		}
-	}
-
-exchange_common:
-
-	/* 跨显示器且任一方有堆叠关系时不允许交换 */
-	if (m1 != m2 && ((n1 && n1->prev_in_stack) || (n2 && n2->prev_in_stack) ||
-					 (n1 && n1->next_in_stack) || (n2 && n2->next_in_stack)))
+	if (layout1->id == SCROLLER || layout2->id == SCROLLER) {
+		exchange_two_scroller_clients(c1, c2);
 		return;
-
-	struct wl_list *tmp1_prev = c1->link.prev;
-	struct wl_list *tmp2_prev = c2->link.prev;
-	struct wl_list *tmp1_next = c1->link.next;
-	struct wl_list *tmp2_next = c2->link.next;
-
-	if (c1->link.next == &c2->link) {
-		c1->link.next = c2->link.next;
-		c1->link.prev = &c2->link;
-		c2->link.next = &c1->link;
-		c2->link.prev = tmp1_prev;
-		tmp1_prev->next = &c2->link;
-		tmp2_next->prev = &c1->link;
-	} else if (c2->link.next == &c1->link) {
-		c2->link.next = c1->link.next;
-		c2->link.prev = &c1->link;
-		c1->link.next = &c2->link;
-		c1->link.prev = tmp2_prev;
-		tmp2_prev->next = &c1->link;
-		tmp1_next->prev = &c2->link;
-	} else {
-		c2->link.next = tmp1_next;
-		c2->link.prev = tmp1_prev;
-		c1->link.next = tmp2_next;
-		c1->link.prev = tmp2_prev;
-		tmp1_prev->next = &c2->link;
-		tmp1_next->prev = &c2->link;
-		tmp2_prev->next = &c1->link;
-		tmp2_next->prev = &c1->link;
 	}
 
-	const Layout *layout1 = c1->mon->pertag->ltidxs[c1->mon->pertag->curtag];
-
-	const Layout *layout2 = c2->mon->pertag->ltidxs[c2->mon->pertag->curtag];
-
-	if (c1->mon != c2->mon) {
-
-		if (layout1->id == DWINDLE && layout2->id == DWINDLE) {
-			DwindleNode **c1_root =
-				&m1->pertag->dwindle_root[m1->pertag->curtag];
-			DwindleNode *c1node = dwindle_find_leaf(*c1_root, c1);
-
-			DwindleNode **c2_root =
-				&m2->pertag->dwindle_root[m2->pertag->curtag];
-			DwindleNode *c2node = dwindle_find_leaf(*c2_root, c2);
-
-			if (c1node)
-				c1node->client = c2;
-
-			if (c2node)
-				c2node->client = c1;
-		}
-
-		tmp_mon = c2->mon;
-		tmp_tags = c2->tags;
-		setmon(c2, c1->mon, c1->tags, false);
-		setmon(c1, tmp_mon, tmp_tags, false);
-		if (c1->mon &&
-			c1->mon->pertag->ltidxs[c1->mon->pertag->curtag]->id == DWINDLE) {
-			dwindle_swap_clients(
-				&c1->mon->pertag->dwindle_root[c1->mon->pertag->curtag], c1,
-				c2);
-		}
-		arrange(c1->mon, false, false);
-		arrange(c2->mon, false, false);
-	} else {
-		if (layout1->id == DWINDLE && layout2->id == DWINDLE) {
-			dwindle_swap_clients(
-				&c1->mon->pertag->dwindle_root[c1->mon->pertag->curtag], c1,
-				c2);
-		}
-		arrange(c1->mon, false, false);
+	if (layout1->id == DWINDLE && layout2->id == DWINDLE) {
+		dwindle_swap_clients(c1, c2);
+		return;
 	}
 
-	// In order to facilitate repeated exchanges for get_focused_stack_client
-	// set c2 focus order behind c1
-	wl_list_remove(&c2->flink);
-	wl_list_insert(&c1->flink, &c2->flink);
+	client_swap_layout_properties(c1, c2);
+
+	wl_list_swap(&c1->link, &c2->link);
+
+	if (m1 != m2) {
+		client_swap_monitors_and_tags(c1, c2);
+	}
+
+	finish_exchange_arrange_and_focus(c1, c2, m1, m2);
 }
 
 void set_activation_env() {
@@ -6585,15 +6441,6 @@ setfloating(Client *c, int32_t floating) {
 								layers[c->isfloating ? LyrFloat : LyrTile]);
 	}
 
-	if (!c->isfloating && old_floating_state &&
-		(c->old_stack_inner_per > 0.0f || c->old_master_inner_per > 0.0f)) {
-		restore_size_per(c->mon, c);
-	}
-
-	if (c->isfloating && !old_floating_state) {
-		save_old_size_per(c->mon);
-	}
-
 	if (!c->force_fakemaximize)
 		client_set_maximized(c, false);
 
@@ -6710,7 +6557,6 @@ void setfullscreen(Client *c, int32_t fullscreen) // 用自定义全屏代理自
 	if (c->mon->isoverview)
 		return;
 
-	int32_t old_fullscreen_state = c->isfullscreen;
 	c->isfullscreen = fullscreen;
 
 	client_set_fullscreen(c, fullscreen);
@@ -6760,14 +6606,6 @@ void setfullscreen(Client *c, int32_t fullscreen) // 用自定义全屏代理自
 		wlr_scene_node_reparent(
 			&c->scene->node,
 			layers[fullscreen ? LyrTop : (c->isfloating ? LyrFloat : LyrTile)]);
-	}
-
-	if (!c->isfullscreen && old_fullscreen_state) {
-		restore_size_per(c->mon, c);
-	}
-
-	if (c->isfullscreen && !old_fullscreen_state) {
-		save_old_size_per(c->mon);
 	}
 
 	arrange(c->mon, false, false);
@@ -6970,13 +6808,30 @@ void create_output(struct wlr_backend *backend, void *data) {
 // 修改信号处理函数，接收掩码参数
 void handle_print_status(struct wl_listener *listener, void *data) {
 
+	ipc_notify_keymode();
+	ipc_notify_kb_layout();
+	ipc_notify_all_tags();
+	ipc_notify_all_clients();
+	ipc_notify_all_monitors();
+
+	Client *c = NULL;
+	wl_list_for_each(c, &clients, link) {
+		if (c->iskilling)
+			continue;
+		ipc_notify_client(c);
+	}
+
 	Monitor *m = NULL;
 	wl_list_for_each(m, &mons, link) {
 		if (!m->wlr_output->enabled) {
 			continue;
 		}
-		dwl_ext_workspace_printstatus(m);
 
+		ipc_notify_monitor(m);
+		ipc_notify_tags(m);
+		ipc_notify_last_surface_ws_name(m);
+
+		dwl_ext_workspace_printstatus(m);
 		dwl_ipc_output_printstatus(m);
 	}
 }
@@ -7005,6 +6860,9 @@ void setup(void) {
 	 * clients from the Unix socket, manging Wayland globals, and so on. */
 	dpy = wl_display_create();
 	event_loop = wl_display_get_event_loop(dpy);
+
+	ipc_init(event_loop);
+
 	tablet_mgr = wlr_tablet_v2_create(dpy);
 	/* The backend is a wlroots feature which abstracts the underlying input
 	 * and output hardware. The autocreate option will choose the most
@@ -7675,6 +7533,36 @@ uint32_t want_restore_fullscreen(Client *target_client) {
 	return 1;
 }
 
+void overview_backup_surface(Client *c) {
+
+	if (c->overview_scene_surface) {
+		return;
+	}
+
+	struct wlr_box geometry;
+	client_get_geometry(c, &geometry);
+	struct wlr_box clip_box = (struct wlr_box){
+		.x = geometry.x,
+		.y = geometry.y,
+		.width = c->overview_backup_geom.width - 2 * config.borderpx,
+		.height = c->overview_backup_geom.height - 2 * config.borderpx,
+	};
+
+	if (client_is_x11(c)) {
+		clip_box.x = 0;
+		clip_box.y = 0;
+	}
+
+	c->overview_scene_surface = c->scene_surface;
+	wlr_scene_node_set_enabled(&c->scene_surface->node, true);
+	wlr_scene_node_set_position(&c->scene_surface->node, 0, 0);
+	wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, &clip_box);
+	c->scene_surface =
+		wlr_scene_tree_snapshot(&c->scene_surface->node, c->scene);
+	wlr_scene_node_set_enabled(&c->overview_scene_surface->node, false);
+	wlr_scene_node_set_enabled(&c->scene_surface->node, true);
+}
+
 // 普通视图切换到overview时保存窗口的旧状态
 void overview_backup(Client *c) {
 	c->overview_isfloatingbak = c->isfloating;
@@ -7689,6 +7577,11 @@ void overview_backup(Client *c) {
 	if (c->isfloating) {
 		c->isfloating = 0;
 	}
+
+	if (config.ov_no_resize) {
+		overview_backup_surface(c);
+	}
+
 	if (c->isfullscreen || c->ismaximizescreen) {
 		client_pending_fullscreen_state(c, 0); // 清除窗口全屏标志
 		client_pending_maximized_state(c, 0);
@@ -7711,6 +7604,12 @@ void overview_restore(Client *c, const Arg *arg) {
 	c->bw = c->overview_backup_bw;
 	c->animation.tagining = false;
 	c->is_restoring_from_ov = (arg->ui & c->tags & effective_tagmask) == 0 ? true : false;
+
+	if (c->overview_scene_surface) {
+		wlr_scene_node_destroy(&c->scene_surface->node);
+		c->scene_surface = c->overview_scene_surface;
+		c->overview_scene_surface = NULL;
+	}
 
 	if (c->isfloating) {
 		// XRaiseWindow(dpy, c->win); // 提升悬浮窗口到顶层
@@ -7766,7 +7665,7 @@ int32_t hidecursor(void *data) {
 }
 
 void check_keep_idle_inhibit(Client *c) {
-	if (c && c->indleinhibit_when_focus && keep_idle_inhibit_source) {
+	if (c && c->idleinhibit_when_focus && keep_idle_inhibit_source) {
 		wl_event_source_timer_update(keep_idle_inhibit_source, 1000);
 	}
 }
@@ -7783,7 +7682,7 @@ int32_t keep_idle_inhibit(void *data) {
 		return 1;
 	}
 
-	if (!selmon || !selmon->sel || !selmon->sel->indleinhibit_when_focus) {
+	if (!selmon || !selmon->sel || !selmon->sel->idleinhibit_when_focus) {
 		wl_event_source_timer_update(keep_idle_inhibit_source, 0);
 		return 1;
 	}
@@ -8006,7 +7905,8 @@ void updatemons(struct wl_listener *listener, void *data) {
 				c->geom.x += mon_pos_offsetx;
 				c->geom.y += mon_pos_offsety;
 				c->float_geom = c->geom;
-				resize(c, c->geom, 1);
+				if (VISIBLEON(c, m))
+					resize(c, c->geom, 1);
 			}
 
 			// restore window to old monitor
