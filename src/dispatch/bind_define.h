@@ -609,7 +609,7 @@ int32_t setlayout(const Arg *arg) {
 			selmon->pertag->ltidxs[selmon->pertag->curtag] = &layouts[jk];
 			clear_fullscreen_and_maximized_state(selmon);
 			arrange(selmon, false, false);
-			printstatus();
+			printstatus(IPC_WATCH_ARRANGGE);
 			return 0;
 		}
 	}
@@ -623,7 +623,7 @@ int32_t setkeymode(const Arg *arg) {
 	} else {
 		keymode.isdefault = false;
 	}
-	printstatus();
+	printstatus(IPC_WATCH_KEYMODE);
 	return 1;
 }
 
@@ -945,9 +945,15 @@ int32_t spawn_shell(const Arg *arg) {
 		return 0;
 
 	if (fork() == 0) {
-		signal(SIGSEGV, SIG_IGN);
-		signal(SIGABRT, SIG_IGN);
-		signal(SIGILL, SIG_IGN);
+		signal(SIGSEGV, SIG_DFL);
+		signal(SIGABRT, SIG_DFL);
+		signal(SIGILL, SIG_DFL);
+		signal(SIGCHLD, SIG_DFL);
+
+		int fd_max = sysconf(_SC_OPEN_MAX);
+		for (int i = 3; i < fd_max; i++) {
+			close(i);
+		}
 
 		dup2(STDERR_FILENO, STDOUT_FILENO);
 		setsid();
@@ -957,7 +963,7 @@ int32_t spawn_shell(const Arg *arg) {
 
 		wlr_log(WLR_DEBUG,
 				"mango-ext: failed to execute command '%s' with shell: %s\n",
-				arg->v, strerror(errno));
+				(char *)arg->v, strerror(errno));
 		_exit(EXIT_FAILURE);
 	}
 	return 0;
@@ -968,16 +974,25 @@ int32_t spawn(const Arg *arg) {
 		return 0;
 
 	if (fork() == 0) {
-		signal(SIGSEGV, SIG_IGN);
-		signal(SIGABRT, SIG_IGN);
-		signal(SIGILL, SIG_IGN);
+		signal(SIGSEGV, SIG_DFL);
+		signal(SIGABRT, SIG_DFL);
+		signal(SIGILL, SIG_DFL);
+		signal(SIGCHLD, SIG_DFL);
+
+		// close all file descriptors inherited from the parent process to
+		// prevent IPC handle leakage that can block clients
+		int fd_max = sysconf(_SC_OPEN_MAX);
+		for (int i = 3; i < fd_max; i++) {
+			close(i);
+		}
 
 		dup2(STDERR_FILENO, STDOUT_FILENO);
 		setsid();
 
 		wordexp_t p;
 		if (wordexp(arg->v, &p, 0) != 0) {
-			wlr_log(WLR_DEBUG, "mango-ext: wordexp failed for '%s'\n", arg->v);
+			wlr_log(WLR_DEBUG, "mango-ext: wordexp failed for '%s'\n",
+					(char *)arg->v);
 			_exit(EXIT_FAILURE);
 		}
 
@@ -1061,16 +1076,15 @@ int32_t switch_keyboard_layout(const Arg *arg) {
 		wlr_seat_keyboard_notify_modifiers(seat, &tkb->modifiers);
 	}
 
-	printstatus();
+	printstatus(IPC_WATCH_KB_LAYOUT);
 	return 0;
 }
 
 int32_t switch_layout(const Arg *arg) {
+
 	int32_t jk, ji;
 	char *target_layout_name = NULL;
 	uint32_t len;
-	uint32_t target_tag = selmon->pertag->curtag ? selmon->pertag->curtag
-												 : selmon->pertag->prevtag;
 
 	if (!selmon)
 		return 0;
@@ -1078,11 +1092,13 @@ int32_t switch_layout(const Arg *arg) {
 	if (config.circle_layout_count != 0) {
 		for (jk = 0; jk < config.circle_layout_count; jk++) {
 
-			len = MAX(strlen(config.circle_layout[jk]),
-					  strlen(selmon->pertag->ltidxs[target_tag]->name));
+			len = MAX(
+				strlen(config.circle_layout[jk]),
+				strlen(selmon->pertag->ltidxs[selmon->pertag->curtag]->name));
 
 			if (strncmp(config.circle_layout[jk],
-						selmon->pertag->ltidxs[target_tag]->name, len) == 0) {
+						selmon->pertag->ltidxs[selmon->pertag->curtag]->name,
+						len) == 0) {
 				target_layout_name = jk == config.circle_layout_count - 1
 										 ? config.circle_layout[0]
 										 : config.circle_layout[jk + 1];
@@ -1097,20 +1113,25 @@ int32_t switch_layout(const Arg *arg) {
 		for (ji = 0; ji < LENGTH(layouts); ji++) {
 			len = MAX(strlen(layouts[ji].name), strlen(target_layout_name));
 			if (strncmp(layouts[ji].name, target_layout_name, len) == 0) {
-				selmon->pertag->ltidxs[target_tag] = &layouts[ji];
+				selmon->pertag->ltidxs[selmon->pertag->curtag] = &layouts[ji];
+
+				break;
 			}
 		}
+		clear_fullscreen_and_maximized_state(selmon);
+		arrange(selmon, false, false);
+		printstatus(IPC_WATCH_ARRANGGE);
 		return 0;
 	}
 
 	for (jk = 0; jk < LENGTH(layouts); jk++) {
 		if (strcmp(layouts[jk].name,
-				   selmon->pertag->ltidxs[target_tag]->name) == 0) {
-			selmon->pertag->ltidxs[target_tag] =
+				   selmon->pertag->ltidxs[selmon->pertag->curtag]->name) == 0) {
+			selmon->pertag->ltidxs[selmon->pertag->curtag] =
 				jk == LENGTH(layouts) - 1 ? &layouts[0] : &layouts[jk + 1];
 			clear_fullscreen_and_maximized_state(selmon);
 			arrange(selmon, false, false);
-			printstatus();
+			printstatus(IPC_WATCH_ARRANGGE);
 			return 0;
 		}
 	}
@@ -1468,7 +1489,7 @@ int32_t toggletag(const Arg *arg) {
 		focusclient(focustop(selmon), 1);
 		arrange(selmon, false, false);
 	}
-	printstatus();
+	printstatus(IPC_WATCH_ARRANGGE);
 	return 0;
 }
 
@@ -1494,7 +1515,7 @@ int32_t toggleview(const Arg *arg) {
 		}
 		arrange(selmon, false, false);
 	}
-	printstatus();
+	printstatus(IPC_WATCH_ARRANGGE);
 	return 0;
 }
 
@@ -1666,7 +1687,7 @@ int32_t comboview(const Arg *arg) {
 		view(&(Arg){.ui = newtags}, false);
 	}
 
-	printstatus();
+	printstatus(IPC_WATCH_ARRANGGE);
 	return 0;
 }
 
@@ -2205,6 +2226,6 @@ int32_t focusid(const Arg *arg) {
 		return 0;
 
 	Client *c = arg->tc;
-	focusclient(c, 1);
+	client_active(c);
 	return 0;
 }

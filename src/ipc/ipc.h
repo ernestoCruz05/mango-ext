@@ -9,19 +9,6 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-enum ipc_watch_type {
-	IPC_WATCH_NONE,
-	IPC_WATCH_MONITOR,
-	IPC_WATCH_CLIENT,
-	IPC_WATCH_TAGS,
-	IPC_WATCH_ALL_MONITORS,
-	IPC_WATCH_ALL_TAGS,
-	IPC_WATCH_ALL_CLIENTS,
-	IPC_WATCH_KEYMODE,
-	IPC_WATCH_KB_LAYOUT,
-	IPC_WATCH_LAST_OPEN_SURFACE,
-};
-
 struct ipc_watch_client {
 	struct wl_list link;
 	int fd;
@@ -79,8 +66,8 @@ static const char *ipc_get_layout_str(void) {
 	xkb_layout_index_t current = xkb_state_serialize_layout(
 		keyboard->xkb_state, XKB_STATE_LAYOUT_EFFECTIVE);
 	static char layout[32];
-	get_layout_abbr(layout,
-					xkb_keymap_layout_get_name(keyboard->keymap, current));
+	const char *name = xkb_keymap_layout_get_name(keyboard->keymap, current);
+	snprintf(layout, sizeof(layout), "%s", name ? name : "");
 	return layout;
 }
 
@@ -153,13 +140,15 @@ static cJSON *monitor_active_tags(Monitor *m) {
 
 static cJSON *build_client_json(Client *c) {
 	cJSON *obj = cJSON_CreateObject();
+
 	cJSON_AddNumberToObject(obj, "id", c->id);
 	cJSON_AddNumberToObject(obj, "pid", c->pid);
 	cJSON_AddStringToObject(obj, "title", client_get_title(c));
 	cJSON_AddStringToObject(obj, "appid", client_get_appid(c));
-	cJSON_AddStringToObject(obj, "monitor", c->mon->wlr_output->name);
+	cJSON_AddStringToObject(obj, "monitor",
+							c->mon ? c->mon->wlr_output->name : "");
 	cJSON_AddItemToObject(obj, "tags", tags_mask_to_array(c->tags));
-	cJSON_AddBoolToObject(obj, "is_focused", c == focustop(c->mon));
+	cJSON_AddBoolToObject(obj, "is_focused", c->isfocusing);
 	cJSON_AddBoolToObject(obj, "is_fullscreen", c->isfullscreen);
 	cJSON_AddBoolToObject(obj, "is_floating", c->isfloating);
 	cJSON_AddBoolToObject(obj, "is_maximized", c->ismaximizescreen);
@@ -228,7 +217,7 @@ static cJSON *build_monitor_tags_response(Monitor *m) {
 
 static void send_static_json(int fd, const char *json_str) {
 	size_t len = strlen(json_str);
-	send(fd, json_str, len, MSG_NOSIGNAL);
+	send(fd, json_str, len, 0);
 }
 
 /* ---------- 一次性命令处理 ---------- */
@@ -252,9 +241,14 @@ static void handle_command(int client_fd, const char *cmd_raw) {
 	} else if (strcmp(cmd, "get keyboardlayout") == 0) {
 		resp = cJSON_CreateObject();
 		cJSON_AddStringToObject(resp, "layout", ipc_get_layout_str());
-	} else if (strncmp(cmd, "get last_open_surface ", 25) == 0) {
-		const char *name = cmd + 25;
-		Monitor *m = monitor_by_name(name);
+	} else if (strcmp(cmd, "get last_open_surface") == 0 ||
+			   strncmp(cmd, "get last_open_surface ", 22) == 0) {
+		Monitor *m;
+		if (cmd[21] == '\0') { // exactly "get last_open_surface"
+			m = selmon;
+		} else {
+			m = monitor_by_name(cmd + 22);
+		}
 		if (!m) {
 			send_static_json(client_fd, "{\"error\":\"monitor not found\"}\n");
 			return;
@@ -270,6 +264,13 @@ static void handle_command(int client_fd, const char *cmd_raw) {
 			return;
 		}
 		resp = build_monitor_json(m);
+	} else if (strcmp(cmd, "get focusing-client") == 0) {
+		if (selmon && selmon->sel) {
+			resp = build_client_json(selmon->sel);
+		} else {
+			send_static_json(client_fd, "{\"error\":\"no focused client\"}\n");
+			return;
+		}
 	} else if (strncmp(cmd, "get client ", 11) == 0) {
 		Client *c = client_by_id((uint32_t)atoi(cmd + 11));
 		if (!c) {
@@ -376,13 +377,11 @@ static void handle_command(int client_fd, const char *cmd_raw) {
 		}
 
 		Arg arg = {0};
-		int32_t (*func)(const Arg *) =
-			parse_func_name(token_count > 0 ? tokens[0] : "", &arg,
-							token_count > 1 ? tokens[1] : NULL,
-							token_count > 2 ? tokens[2] : NULL,
-							token_count > 3 ? tokens[3] : NULL,
-							token_count > 4 ? tokens[4] : NULL,
-							token_count > 5 ? tokens[5] : NULL);
+		int32_t (*func)(const Arg *) = parse_func_name(
+			token_count > 0 ? tokens[0] : "", &arg,
+			token_count > 1 ? tokens[1] : "", token_count > 2 ? tokens[2] : "",
+			token_count > 3 ? tokens[3] : "", token_count > 4 ? tokens[4] : "",
+			token_count > 5 ? tokens[5] : "");
 
 		if (func && client_id > 0)
 			arg.tc = client_by_id((uint32_t)client_id);
@@ -414,7 +413,7 @@ static void handle_command(int client_fd, const char *cmd_raw) {
 			char *msg = malloc(len + 2);
 			if (msg) {
 				snprintf(msg, len + 2, "%s\n", json_str);
-				send(client_fd, msg, len + 1, MSG_NOSIGNAL);
+				send(client_fd, msg, len + 1, 0);
 				free(msg);
 			}
 			free(json_str);
@@ -435,7 +434,7 @@ static void ipc_notify_json_to_fd(int fd, cJSON *json) {
 		return;
 	}
 	snprintf(msg, len + 2, "%s\n", str);
-	if (send(fd, msg, len + 1, MSG_NOSIGNAL) < 0) {
+	if (send(fd, msg, len + 1, 0) < 0) {
 		struct ipc_watch_client *wc, *tmp;
 		wl_list_for_each_safe(wc, tmp, &watch_clients, link) {
 			if (wc->fd == fd) {
@@ -463,7 +462,7 @@ static int ipc_watch_data_handler(int fd, uint32_t mask, void *data) {
 	}
 	if (mask & WL_EVENT_READABLE) {
 		char buf[64];
-		ssize_t n = recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
+		ssize_t n = recv(fd, buf, sizeof(buf), 0);
 		if (n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
 			ipc_remove_watch_client(wc);
 		}
@@ -480,6 +479,8 @@ static bool handle_watch_command(int fd, const char *cmd,
 	if (strncmp(cmd, "watch monitor ", 14) == 0) {
 		type = IPC_WATCH_MONITOR;
 		arg = cmd + 14;
+	} else if (strcmp(cmd, "watch focusing-client") == 0) {
+		type = IPC_WATCH_FOCUSING_CLIENT;
 	} else if (strncmp(cmd, "watch client ", 13) == 0) {
 		type = IPC_WATCH_CLIENT;
 		client_id = (uint32_t)atoi(cmd + 13);
@@ -496,9 +497,14 @@ static bool handle_watch_command(int fd, const char *cmd,
 		type = IPC_WATCH_KEYMODE;
 	} else if (strcmp(cmd, "watch keyboardlayout") == 0) {
 		type = IPC_WATCH_KB_LAYOUT;
-	} else if (strncmp(cmd, "watch last_open_surface ", 27) == 0) {
+	} else if (strcmp(cmd, "watch last_open_surface") == 0 ||
+			   strncmp(cmd, "watch last_open_surface ", 24) == 0) {
 		type = IPC_WATCH_LAST_OPEN_SURFACE;
-		arg = cmd + 27;
+		if (cmd[24] != '\0') { // has argument after the space
+			arg = cmd + 24;
+		} else {
+			arg = NULL; // default to selmon
+		}
 	}
 
 	if (type == IPC_WATCH_NONE)
@@ -534,12 +540,28 @@ static bool handle_watch_command(int fd, const char *cmd,
 		break;
 	}
 	case IPC_WATCH_LAST_OPEN_SURFACE: {
-		Monitor *m = monitor_by_name(arg);
+		Monitor *m = NULL;
+		if (arg) {
+			m = monitor_by_name(arg);
+		} else {
+			m = selmon;
+		}
 		if (m) {
 			json = cJSON_CreateObject();
 			cJSON_AddStringToObject(json, "monitor", m->wlr_output->name);
 			cJSON_AddStringToObject(json, "last_open_surface",
 									m->last_open_surface);
+		}
+		break;
+	}
+	case IPC_WATCH_FOCUSING_CLIENT: {
+		if (selmon && selmon->sel) {
+			json = build_client_json(selmon->sel);
+		} else {
+			json = cJSON_CreateObject();
+			cJSON_AddNullToObject(json, "id");
+			cJSON_AddNullToObject(json, "title");
+			cJSON_AddNullToObject(json, "appid");
 		}
 		break;
 	}
@@ -621,9 +643,7 @@ static int ipc_handle_client_data(int fd, uint32_t mask, void *data) {
 			available = client->buf_cap - client->buf_len;
 		}
 
-		// 直接读取到 client->buf 尾部，跳过临时数组
-		ssize_t n = recv(fd, client->buf + client->buf_len, available - 1,
-						 MSG_DONTWAIT);
+		ssize_t n = recv(fd, client->buf + client->buf_len, available - 1, 0);
 		if (n <= 0)
 			goto cleanup;
 
@@ -633,7 +653,7 @@ static int ipc_handle_client_data(int fd, uint32_t mask, void *data) {
 		char *nl = memchr(client->buf, '\n', client->buf_len);
 		if (!nl) {
 			if (client->buf_len > 1024 * 1024)
-				goto cleanup; // 防御过长命令
+				goto cleanup;
 			return 0;
 		}
 		*nl = '\0';
@@ -662,8 +682,12 @@ static int ipc_handle_connection(int fd, uint32_t mask, void *data) {
 	if (client_fd < 0)
 		return 0;
 
+	// 设置 O_NONBLOCK
 	int flags = fcntl(client_fd, F_GETFL, 0);
 	fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
+	// 设置 FD_CLOEXEC
+	flags = fcntl(client_fd, F_GETFD, 0);
+	fcntl(client_fd, F_SETFD, flags | FD_CLOEXEC);
 
 	struct ipc_client_state *client = calloc(1, sizeof(*client));
 	client->fd = client_fd;
@@ -694,7 +718,7 @@ void ipc_notify_monitor(Monitor *m) {
 				snprintf(json_str, len + 2, "%s\n", raw);
 				free(raw);
 			}
-			if (send(wc->fd, json_str, len + 1, MSG_NOSIGNAL) < 0)
+			if (send(wc->fd, json_str, len + 1, 0) < 0)
 				ipc_remove_watch_client(wc);
 		}
 	}
@@ -707,13 +731,57 @@ void ipc_notify_last_surface_ws_name(Monitor *m) {
 	size_t len = 0;
 	struct ipc_watch_client *wc, *tmp;
 	wl_list_for_each_safe(wc, tmp, &watch_clients, link) {
-		if (wc->type == IPC_WATCH_LAST_OPEN_SURFACE &&
-			strcmp(m->wlr_output->name, wc->target.monitor.name) == 0) {
+		if (wc->type != IPC_WATCH_LAST_OPEN_SURFACE)
+			continue;
+
+		bool match = false;
+		if (wc->target.monitor.name[0] == '\0') {
+			if (m == selmon)
+				match = true;
+		} else {
+			if (strcmp(m->wlr_output->name, wc->target.monitor.name) == 0)
+				match = true;
+		}
+
+		if (!match)
+			continue;
+
+		if (!json_str) {
+			cJSON *json = cJSON_CreateObject();
+			cJSON_AddStringToObject(json, "monitor", m->wlr_output->name);
+			cJSON_AddStringToObject(json, "last_open_surface",
+									m->last_open_surface);
+			char *raw = cJSON_PrintUnformatted(json);
+			cJSON_Delete(json);
+			if (!raw)
+				return;
+			len = strlen(raw);
+			json_str = malloc(len + 2);
+			snprintf(json_str, len + 2, "%s\n", raw);
+			free(raw);
+		}
+		if (send(wc->fd, json_str, len + 1, 0) < 0)
+			ipc_remove_watch_client(wc);
+	}
+	free(json_str);
+}
+
+void ipc_notify_focusing_client(void) {
+	char *json_str = NULL;
+	size_t len = 0;
+	struct ipc_watch_client *wc, *tmp;
+	wl_list_for_each_safe(wc, tmp, &watch_clients, link) {
+		if (wc->type == IPC_WATCH_FOCUSING_CLIENT) {
 			if (!json_str) {
-				cJSON *json = cJSON_CreateObject();
-				cJSON_AddStringToObject(json, "monitor", m->wlr_output->name);
-				cJSON_AddStringToObject(json, "last_open_surface",
-										m->last_open_surface);
+				cJSON *json = NULL;
+				if (selmon && selmon->sel) {
+					json = build_client_json(selmon->sel);
+				} else {
+					json = cJSON_CreateObject();
+					cJSON_AddNullToObject(json, "id");
+					cJSON_AddNullToObject(json, "title");
+					cJSON_AddNullToObject(json, "appid");
+				}
 				char *raw = cJSON_PrintUnformatted(json);
 				cJSON_Delete(json);
 				if (!raw)
@@ -723,12 +791,11 @@ void ipc_notify_last_surface_ws_name(Monitor *m) {
 				snprintf(json_str, len + 2, "%s\n", raw);
 				free(raw);
 			}
-			if (send(wc->fd, json_str, len + 1, MSG_NOSIGNAL) < 0)
+			if (send(wc->fd, json_str, len + 1, 0) < 0)
 				ipc_remove_watch_client(wc);
 		}
 	}
-	if (json_str)
-		free(json_str);
+	free(json_str);
 }
 
 void ipc_notify_client(Client *c) {
@@ -748,7 +815,7 @@ void ipc_notify_client(Client *c) {
 				snprintf(json_str, len + 2, "%s\n", raw);
 				free(raw);
 			}
-			if (send(wc->fd, json_str, len + 1, MSG_NOSIGNAL) < 0)
+			if (send(wc->fd, json_str, len + 1, 0) < 0)
 				ipc_remove_watch_client(wc);
 		}
 	}
@@ -774,7 +841,7 @@ void ipc_notify_tags(Monitor *m) {
 				snprintf(json_str, len + 2, "%s\n", raw);
 				free(raw);
 			}
-			if (send(wc->fd, json_str, len + 1, MSG_NOSIGNAL) < 0)
+			if (send(wc->fd, json_str, len + 1, 0) < 0)
 				ipc_remove_watch_client(wc);
 		}
 	}
@@ -804,7 +871,7 @@ void ipc_notify_all_monitors(void) {
 				snprintf(json_str, len + 2, "%s\n", raw);
 				free(raw);
 			}
-			if (send(wc->fd, json_str, len + 1, MSG_NOSIGNAL) < 0)
+			if (send(wc->fd, json_str, len + 1, 0) < 0)
 				ipc_remove_watch_client(wc);
 		}
 	}
@@ -834,7 +901,7 @@ void ipc_notify_all_clients(void) {
 				snprintf(json_str, len + 2, "%s\n", raw);
 				free(raw);
 			}
-			if (send(wc->fd, json_str, len + 1, MSG_NOSIGNAL) < 0)
+			if (send(wc->fd, json_str, len + 1, 0) < 0)
 				ipc_remove_watch_client(wc);
 		}
 	}
@@ -859,7 +926,7 @@ void ipc_notify_all_tags(void) {
 				snprintf(json_str, len + 2, "%s\n", raw);
 				free(raw);
 			}
-			if (send(wc->fd, json_str, len + 1, MSG_NOSIGNAL) < 0)
+			if (send(wc->fd, json_str, len + 1, 0) < 0)
 				ipc_remove_watch_client(wc);
 		}
 	}
@@ -885,7 +952,7 @@ void ipc_notify_keymode(void) {
 				snprintf(json_str, len + 2, "%s\n", raw);
 				free(raw);
 			}
-			if (send(wc->fd, json_str, len + 1, MSG_NOSIGNAL) < 0)
+			if (send(wc->fd, json_str, len + 1, 0) < 0)
 				ipc_remove_watch_client(wc);
 		}
 	}
@@ -911,7 +978,7 @@ void ipc_notify_kb_layout(void) {
 				snprintf(json_str, len + 2, "%s\n", raw);
 				free(raw);
 			}
-			if (send(wc->fd, json_str, len + 1, MSG_NOSIGNAL) < 0)
+			if (send(wc->fd, json_str, len + 1, 0) < 0)
 				ipc_remove_watch_client(wc);
 		}
 	}
@@ -934,10 +1001,24 @@ void ipc_init(struct wl_event_loop *event_loop) {
 	snprintf(ipc_socket_path, sizeof(ipc_socket_path), "%s/mango-%d.sock",
 			 xdg_runtime, getpid());
 
-	ipc_sock_fd =
-		socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	ipc_sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (ipc_sock_fd < 0)
 		return;
+
+	// 设置 FD_CLOEXEC
+	int flags = fcntl(ipc_sock_fd, F_GETFD, 0);
+	if (flags == -1 || fcntl(ipc_sock_fd, F_SETFD, flags | FD_CLOEXEC) == -1) {
+		wlr_log(WLR_ERROR, "failed to set FD_CLOEXEC on IPC socket");
+		close(ipc_sock_fd);
+		return;
+	}
+	// 设置 O_NONBLOCK
+	flags = fcntl(ipc_sock_fd, F_GETFL, 0);
+	if (flags == -1 || fcntl(ipc_sock_fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+		wlr_log(WLR_ERROR, "failed to set O_NONBLOCK on IPC socket");
+		close(ipc_sock_fd);
+		return;
+	}
 
 	struct sockaddr_un addr = {.sun_family = AF_UNIX};
 	strncpy(addr.sun_path, ipc_socket_path, sizeof(addr.sun_path) - 1);
