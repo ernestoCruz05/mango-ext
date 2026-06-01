@@ -160,6 +160,23 @@ typedef struct {
 	Arg arg;
 } GestureBinding;
 
+typedef enum {
+	CANVAS_GESTURE_SWIPE,
+	CANVAS_GESTURE_PINCH,
+} CanvasGestureType;
+
+typedef enum {
+	CANVAS_ACTION_PAN,
+	CANVAS_ACTION_ZOOM,
+} CanvasGestureAction;
+
+typedef struct {
+	CanvasGestureType type;
+	int32_t fingers;
+	CanvasGestureAction action;
+	float sensitivity;
+} CanvasGestureBinding;
+
 typedef struct {
 	uint32_t swipe;
 	uint32_t edge;
@@ -399,6 +416,10 @@ typedef struct {
 
 	GestureBinding *gesture_bindings;
 	int32_t gesture_bindings_count;
+
+	CanvasGestureBinding *canvas_gesture_bindings;
+	int32_t canvas_gesture_bindings_count;
+	int32_t canvas_gesture_user_set;
 
 	TouchGestureBinding *touch_gesture_bindings;
 	int32_t touch_gesture_bindings_count;
@@ -2920,6 +2941,99 @@ bool parse_option(Config *config, char *key, char *value) {
 			config->switch_bindings_count++;
 		}
 
+	} else if (strncmp(key, "canvasgesture", 13) == 0) {
+		char type_str[256], fingers_str[256], action_str[256],
+			sens_str[256] = "1.0\0";
+		int matched = sscanf(value, "%255[^,],%255[^,],%255[^,],%255[^\n]",
+							 type_str, fingers_str, action_str, sens_str);
+		if (matched < 3) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Invalid canvasgesture "
+					"format: %s\n",
+					value);
+			return false;
+		}
+
+		trim_whitespace(type_str);
+		trim_whitespace(fingers_str);
+		trim_whitespace(action_str);
+		trim_whitespace(sens_str);
+
+		CanvasGestureType type;
+		if (strcmp(type_str, "swipe") == 0) {
+			type = CANVAS_GESTURE_SWIPE;
+		} else if (strcmp(type_str, "pinch") == 0) {
+			type = CANVAS_GESTURE_PINCH;
+		} else {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Unknown canvasgesture "
+					"type: \033[1m\033[31m%s\n",
+					type_str);
+			return false;
+		}
+
+		CanvasGestureAction action;
+		if (strcmp(action_str, "canvas_pan") == 0) {
+			action = CANVAS_ACTION_PAN;
+		} else if (strcmp(action_str, "canvas_zoom") == 0) {
+			action = CANVAS_ACTION_ZOOM;
+		} else {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Unknown canvasgesture "
+					"action: \033[1m\033[31m%s\n",
+					action_str);
+			return false;
+		}
+
+		int32_t fingers = atoi(fingers_str);
+		if (fingers <= 0) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m canvasgesture fingers "
+					"must be > 0: %s\n",
+					fingers_str);
+			return false;
+		}
+
+		float sensitivity = atof(sens_str);
+
+		/* First user line replaces the seeded defaults. */
+		if (!config->canvas_gesture_user_set) {
+			config->canvas_gesture_user_set = 1;
+			config->canvas_gesture_bindings_count = 0;
+		}
+
+		/* Warn on duplicate (type, fingers); first match wins at dispatch. */
+		for (int32_t ci = 0; ci < config->canvas_gesture_bindings_count; ci++) {
+			if (config->canvas_gesture_bindings[ci].type == type &&
+				config->canvas_gesture_bindings[ci].fingers == fingers) {
+				fprintf(stderr,
+						"\033[1m\033[33m[WARN]:\033[0m duplicate canvasgesture "
+						"for type/fingers, first wins: %s\n",
+						value);
+				break;
+			}
+		}
+
+		config->canvas_gesture_bindings = realloc(
+			config->canvas_gesture_bindings,
+			(config->canvas_gesture_bindings_count + 1) *
+				sizeof(CanvasGestureBinding));
+		if (!config->canvas_gesture_bindings) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Failed to allocate "
+					"memory for canvasgesture\n");
+			return false;
+		}
+
+		CanvasGestureBinding *cb =
+			&config->canvas_gesture_bindings[config
+												 ->canvas_gesture_bindings_count];
+		cb->type = type;
+		cb->fingers = fingers;
+		cb->action = action;
+		cb->sensitivity = sensitivity;
+		config->canvas_gesture_bindings_count++;
+
 	} else if (strncmp(key, "gesturebind", 11) == 0) {
 		config->gesture_bindings = realloc(
 			config->gesture_bindings,
@@ -3392,6 +3506,13 @@ void free_config(void) {
 		config.gesture_bindings_count = 0;
 	}
 
+	if (config.canvas_gesture_bindings) {
+		free(config.canvas_gesture_bindings);
+		config.canvas_gesture_bindings = NULL;
+		config.canvas_gesture_bindings_count = 0;
+		config.canvas_gesture_user_set = 0;
+	}
+
 	if (config.touch_gesture_bindings) {
 		for (i = 0; i < config.touch_gesture_bindings_count; i++) {
 			if (config.touch_gesture_bindings[i].arg.v) {
@@ -3819,6 +3940,22 @@ void set_value_default() {
 	config.canvas_tiling_gap = 10;
 	config.canvas_pan_on_kill = 1;
 	config.canvas_anchor_animate = 0;
+	config.canvas_gesture_user_set = 0;
+	config.canvas_gesture_bindings_count = 2;
+	config.canvas_gesture_bindings =
+		calloc(2, sizeof(CanvasGestureBinding));
+	config.canvas_gesture_bindings[0] = (CanvasGestureBinding){
+		.type = CANVAS_GESTURE_SWIPE,
+		.fingers = 3,
+		.action = CANVAS_ACTION_PAN,
+		.sensitivity = 1.0f,
+	};
+	config.canvas_gesture_bindings[1] = (CanvasGestureBinding){
+		.type = CANVAS_GESTURE_PINCH,
+		.fingers = 2,
+		.action = CANVAS_ACTION_ZOOM,
+		.sensitivity = 1.0f,
+	};
 	config.tag_carousel = 0;
 	config.max_tags = LENGTH(tags);
 	config.overviewgappi = 5;
@@ -4016,6 +4153,9 @@ bool parse_config(void) {
 	config.gesture_bindings_count = 0;
 	config.touch_gesture_bindings = NULL;
 	config.touch_gesture_bindings_count = 0;
+	config.canvas_gesture_bindings = NULL;
+	config.canvas_gesture_bindings_count = 0;
+	config.canvas_gesture_user_set = 0;
 	config.env = NULL;
 	config.env_count = 0;
 	config.exec = NULL;

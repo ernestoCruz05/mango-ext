@@ -84,6 +84,41 @@ Set anchors appear as color-coded dots on the minimap (red, orange, yellow, gree
 
 > **Note:** Anchors are stored in memory only and reset when the compositor restarts. Zoom is not affected by anchors — only the pan position is saved and restored.
 
+### Canvas gestures
+
+Trackpad pan and zoom on the canvas are configurable. Bind a gesture to a canvas action with `canvasgesture`:
+
+```ini
+canvasgesture=<type>,<fingers>,<action>[,<sensitivity>]
+```
+
+| field | values | Description |
+|:---|:---|:---|
+| `type` | `swipe`, `pinch` | the trackpad gesture |
+| `fingers` | int | finger count to match (pinch is conventionally `2`) |
+| `action` | `canvas_pan`, `canvas_zoom` | what the gesture drives |
+| `sensitivity` | float | optional multiplier, default `1.0`; higher = more movement/zoom per gesture |
+
+Notes:
+
+- A `swipe` bound to `canvas_zoom` zooms along the vertical axis: swipe **up** to zoom in, **down** to zoom out.
+- Zoom is always anchored at the cursor.
+- **Defining any `canvasgesture` line replaces all built-in defaults**, so redeclare every gesture you want (e.g. include a `canvas_pan` line even if you only meant to change zoom).
+
+The built-in defaults (used when no `canvasgesture` line is set) are:
+
+```ini
+canvasgesture=swipe,3,canvas_pan
+canvasgesture=pinch,2,canvas_zoom
+```
+
+Example — pan with three fingers and zoom with a four-finger swipe instead of a pinch:
+
+```ini
+canvasgesture=swipe,3,canvas_pan
+canvasgesture=swipe,4,canvas_zoom,1.5
+```
+
 ### Recommended keybind setup
 
 ```ini
