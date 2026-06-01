@@ -237,14 +237,12 @@ static void canvas(Monitor *m) {
 		int screen_y =
 			m->w.y + (int32_t)roundf((c->canvas_geom[tag].y - pan_y) * zoom);
 
-		float effective_zoom = zoom;
 		int32_t base_w = c->canvas_geom[tag].width;
 		int32_t base_h = c->canvas_geom[tag].height;
 
 		if (m->canvas_in_overview && c->canvas_geom_backup[tag].width > 0) {
 			base_w = c->canvas_geom_backup[tag].width;
 			base_h = c->canvas_geom_backup[tag].height;
-			effective_zoom *= (float)c->canvas_geom[tag].width / base_w;
 		}
 
 		struct wlr_box client_geom = {
