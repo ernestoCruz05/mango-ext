@@ -293,6 +293,7 @@ typedef struct {
 	int32_t overviewgappi;
 	int32_t overviewgappo;
 	uint32_t cursor_hide_timeout;
+	uint32_t cursor_hide_on_keypress;
 
 	uint32_t axis_bind_apply_timeout;
 	uint32_t focus_on_activate;
@@ -695,6 +696,26 @@ int32_t parse_distance(const char *str) {
 		return DISTANCE_LONG;
 	} else {
 		return DISTANCE_ANY;
+	}
+}
+
+int32_t parse_force(const char *str) {
+	// 将输入字符串转换为小写
+	char lowerStr[10];
+	int32_t i = 0;
+	while (str[i] && i < 9) {
+		lowerStr[i] = tolower(str[i]);
+		i++;
+	}
+	lowerStr[i] = '\0';
+
+	// 根据转换后的小写字符串返回对应的枚举值
+	if (strcmp(lowerStr, "unforce") == 0) {
+		return UNFORCE;
+	} else if (strcmp(lowerStr, "force") == 0) {
+		return FORCE;
+	} else {
+		return UNFORCE;
 	}
 }
 
@@ -1168,6 +1189,7 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 		(*arg).i = atoi(arg_value);
 	} else if (strcmp(func_name, "killclient") == 0) {
 		func = killclient;
+		(*arg).i = parse_force(arg_value);
 	} else if (strcmp(func_name, "centerwin") == 0) {
 		func = centerwin;
 	} else if (strcmp(func_name, "focuslast") == 0) {
@@ -1877,6 +1899,8 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->overviewgappo = atoi(value);
 	} else if (strcmp(key, "cursor_hide_timeout") == 0) {
 		config->cursor_hide_timeout = atoi(value);
+	} else if (strcmp(key, "cursor_hide_on_keypress") == 0) {
+		config->cursor_hide_on_keypress = atoi(value);
 	} else if (strcmp(key, "axis_bind_apply_timeout") == 0) {
 		config->axis_bind_apply_timeout = atoi(value);
 	} else if (strcmp(key, "focus_on_activate") == 0) {
@@ -3756,6 +3780,8 @@ void override_config(void) {
 		CLAMP_INT(config.no_radius_when_single, 0, 1);
 	config.cursor_hide_timeout =
 		CLAMP_INT(config.cursor_hide_timeout, 0, 36000);
+	config.cursor_hide_on_keypress =
+		CLAMP_INT(config.cursor_hide_on_keypress, 0, 1);
 	config.single_scratchpad = CLAMP_INT(config.single_scratchpad, 0, 1);
 	config.repeat_rate = CLAMP_INT(config.repeat_rate, 1, 1000);
 	config.repeat_delay = CLAMP_INT(config.repeat_delay, 1, 20000);
@@ -3961,6 +3987,7 @@ void set_value_default() {
 	config.overviewgappi = 5;
 	config.overviewgappo = 30;
 	config.cursor_hide_timeout = 0;
+	config.cursor_hide_on_keypress = 0;
 
 	config.warpcursor = 1;
 	config.drag_corner = 3;

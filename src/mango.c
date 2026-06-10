@@ -222,6 +222,7 @@ enum { NONE, OPEN, MOVE, CLOSE, TAG, FOCUS, OPAFADEIN, OPAFADEOUT, CANVAS_PAN, C
 enum { UNFOLD, FOLD, INVALIDFOLD };
 enum { PREV, NEXT };
 enum { STATE_UNSPECIFIED = 0, STATE_ENABLED, STATE_DISABLED };
+enum { FORCE, UNFORCE };
 
 enum tearing_mode {
 	TEARING_DISABLED = 0,
@@ -1192,7 +1193,7 @@ static struct wl_listener last_cursor_surface_destroy_listener = {
 	.notify = last_cursor_surface_destroy};
 
 #ifdef XWAYLAND
-static void fix_xwayland_unmanaged_coordinate(Client *c);
+static void fix_xwayland_coordinate(struct wlr_box *geom);
 static int32_t synckeymap(void *data);
 static void activatex11(struct wl_listener *listener, void *data);
 static void configurex11(struct wl_listener *listener, void *data);
@@ -1778,7 +1779,7 @@ void applyrules(Client *c) {
 
 #ifdef XWAYLAND
 	if (c->isfloating && client_is_x11(c)) {
-		fix_xwayland_unmanaged_coordinate(c);
+		fix_xwayland_coordinate(&c->geom);
 		c->float_geom = c->geom;
 	}
 #endif
@@ -3506,7 +3507,6 @@ void createlayersurface(struct wl_listener *listener, void *data) {
 	LISTEN(&l->scene->node.events.destroy, &l->destroy, destroylayernodenotify);
 
 	wl_list_insert(&l->mon->layers[layer_surface->pending.layer], &l->link);
-	wlr_surface_send_enter(surface, layer_surface->output);
 }
 
 void createlocksurface(struct wl_listener *listener, void *data) {
@@ -4588,6 +4588,11 @@ void keypress(struct wl_listener *listener, void *data) {
 		}
 	}
 
+	if (config.cursor_hide_on_keypress && !cursor_hidden &&
+		event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+		hidecursor(NULL);
+	}
+
 	/* On _press_ if there is no active screen locker,
 	 * attempt to process a compositor keybinding. */
 	for (i = 0; i < nsyms; i++)
@@ -4856,24 +4861,24 @@ mapnotify(struct wl_listener *listener, void *data) {
 
 	/* Handle unmanaged clients first so we can return prior create borders
 	 */
+#ifdef XWAYLAND
 	if (client_is_unmanaged(c)) {
 		/* Unmanaged clients always are floating */
-#ifdef XWAYLAND
-		if (client_is_x11(c)) {
-			fix_xwayland_unmanaged_coordinate(c);
-			LISTEN(&c->surface.xwayland->events.set_geometry, &c->set_geometry,
-				   setgeometrynotify);
-		}
-#endif
-		wlr_scene_node_reparent(&c->scene->node, layers[LyrOverlay]);
+		fix_xwayland_coordinate(&c->geom);
 		wlr_scene_node_set_position(&c->scene->node, c->geom.x, c->geom.y);
+		wlr_xwayland_surface_configure(c->surface.xwayland, c->geom.x,
+									   c->geom.y, c->geom.width,
+									   c->geom.height);
+		LISTEN(&c->surface.xwayland->events.set_geometry, &c->set_geometry,
+			   setgeometrynotify);
+		wlr_scene_node_reparent(&c->scene->node, layers[LyrOverlay]);
 		if (client_wants_focus(c)) {
 			focusclient(c, 1);
 			exclusive_focus = c;
 		}
 		return;
 	}
-
+#endif
 	// extra node
 
 	for (i = 0; i < 2; i++) {
@@ -6297,7 +6302,8 @@ void exchange_two_client(Client *c1, Client *c2) {
 	const Layout *layout1 = m1->pertag->ltidxs[m1->pertag->curtag];
 	const Layout *layout2 = m2->pertag->ltidxs[m2->pertag->curtag];
 
-	if (layout1->id == SCROLLER || layout2->id == SCROLLER) {
+	if (layout1->id == SCROLLER || layout2->id == SCROLLER ||
+		layout1->id == VERTICAL_SCROLLER || layout2->id == VERTICAL_SCROLLER) {
 		exchange_two_scroller_clients(c1, c2);
 		return;
 	}
@@ -6690,6 +6696,7 @@ void setfullscreen(Client *c, int32_t fullscreen) // 用自定义全屏代理自
 											   &full_clip);
 			request_fresh_all_monitors();
 		}
+
 	} else {
 		c->bw = c->isnoborder ? 0 : config.borderpx;
 		if (c->isfloating)
@@ -8327,16 +8334,17 @@ void virtualpointer(struct wl_listener *listener, void *data) {
 }
 
 #ifdef XWAYLAND
-void fix_xwayland_unmanaged_coordinate(Client *c) {
+void fix_xwayland_coordinate(struct wlr_box *geom) {
 	if (!selmon)
 		return;
 
 	// 1. 如果窗口已经在当前活动显示器内，直接返回
-	if (c->geom.x >= selmon->m.x && c->geom.x < selmon->m.x + selmon->m.width &&
-		c->geom.y >= selmon->m.y && c->geom.y < selmon->m.y + selmon->m.height)
+	if (geom->x >= selmon->m.x && geom->x <= selmon->m.x + selmon->m.width &&
+		geom->y >= selmon->m.y && geom->y <= selmon->m.y + selmon->m.height)
 		return;
 
-	c->geom = setclient_coordinate_center(c, selmon, c->geom, 0, 0);
+	geom->x = selmon->m.x + (selmon->m.width - geom->width) / 2;
+	geom->y = selmon->m.y + (selmon->m.height - geom->height) / 2;
 }
 
 int32_t synckeymap(void *data) {
@@ -8391,24 +8399,41 @@ void activatex11(struct wl_listener *listener, void *data) {
 void configurex11(struct wl_listener *listener, void *data) {
 	Client *c = wl_container_of(listener, c, configure);
 	struct wlr_xwayland_surface_configure_event *event = data;
+	struct wlr_box new_geo;
+	new_geo.x = event->x;
+	new_geo.y = event->y;
+	new_geo.width = event->width;
+	new_geo.height = event->height;
+	fix_xwayland_coordinate(&new_geo);
+
 	if (!client_surface(c) || !client_surface(c)->mapped) {
-		wlr_xwayland_surface_configure(c->surface.xwayland, event->x, event->y,
-									   event->width, event->height);
+
+		wlr_xwayland_surface_configure(c->surface.xwayland, new_geo.x,
+									   new_geo.y, new_geo.width,
+									   new_geo.height);
 		return;
 	}
+
 	if (client_is_unmanaged(c)) {
-		wlr_scene_node_set_position(&c->scene->node, event->x, event->y);
-		wlr_xwayland_surface_configure(c->surface.xwayland, event->x, event->y,
-									   event->width, event->height);
+		wlr_scene_node_set_position(&c->scene->node, new_geo.x, new_geo.y);
+		wlr_xwayland_surface_configure(c->surface.xwayland, new_geo.x,
+									   new_geo.y, new_geo.width,
+									   new_geo.height);
 		return;
 	}
-	if ((c->isfloating && c != grabc) ||
-		!c->mon->pertag->ltidxs[c->mon->pertag->curtag]->arrange) {
+
+	if (c->isfloating && c != grabc) {
+		new_geo.x = new_geo.x - c->bw;
+		new_geo.y = new_geo.y - c->bw;
+		new_geo.width = new_geo.width + c->bw * 2;
+		new_geo.height = new_geo.height + c->bw * 2;
+		fix_xwayland_coordinate(&new_geo);
+
 		resize(c,
-			   (struct wlr_box){.x = event->x - c->bw,
-								.y = event->y - c->bw,
-								.width = event->width + c->bw * 2,
-								.height = event->height + c->bw * 2},
+			   (struct wlr_box){.x = new_geo.x,
+								.y = new_geo.y,
+								.width = new_geo.width,
+								.height = new_geo.height},
 			   0);
 	} else {
 		arrange(c->mon, false, false);

@@ -509,7 +509,8 @@ void client_draw_shadow(Client *c) {
 	if (c->iskilling || !client_surface(c)->mapped || c->isnoshadow)
 		return;
 
-	if (!config.shadows || (!c->isfloating && config.shadow_only_floating)) {
+	if (!config.shadows || c->isfullscreen ||
+		(!c->isfloating && config.shadow_only_floating)) {
 		if (c->shadow->node.enabled)
 			wlr_scene_node_set_enabled(&c->shadow->node, false);
 		return;
@@ -616,7 +617,7 @@ void apply_split_border(Client *c, bool hit_no_border) {
 	const Layout *layout = c->mon->pertag->ltidxs[c->mon->pertag->curtag];
 
 	if (hit_no_border || !ISTILED(c) || layout->id != DWINDLE ||
-		!config.dwindle_manual_split) {
+		!config.dwindle_manual_split || c->isfullscreen) {
 		if (c->splitindicator[0]->node.enabled) {
 			wlr_scene_node_set_enabled(&c->splitindicator[0]->node, false);
 		}
@@ -702,6 +703,18 @@ void apply_split_border(Client *c, bool hit_no_border) {
 void apply_border(Client *c) {
 	if (!c || c->iskilling || !client_surface(c)->mapped)
 		return;
+
+	if (c->isfullscreen) {
+		if (c->border->node.enabled) {
+			wlr_scene_node_set_position(&c->scene_surface->node, 0, 0);
+			wlr_scene_node_set_enabled(&c->border->node, false);
+		}
+		return;
+	} else {
+		if (!c->border->node.enabled) {
+			wlr_scene_node_set_enabled(&c->border->node, true);
+		}
+	}
 
 	float zoom = get_client_effective_zoom(c);
 
