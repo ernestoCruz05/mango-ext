@@ -5317,7 +5317,8 @@ void motionnotify(uint32_t time, struct wlr_input_device *device, double dx,
 	if (!surface && !seat->drag && !cursor_hidden)
 		wlr_cursor_set_xcursor(cursor, cursor_mgr, "default");
 
-	if (c && c->mon && !c->animation.running && (INSIDEMON(c) || !ISTILED(c))) {
+	if (c && c->mon && !c->animation.running &&
+		(INSIDEMON(c) || !ISSCROLLTILED(c))) {
 		scroller_focus_lock = 0;
 	}
 
@@ -5329,13 +5330,15 @@ void motionnotify(uint32_t time, struct wlr_input_device *device, double dx,
 	}
 
 	if (!scroller_focus_lock || !(c && c->mon && !INSIDEMON(c))) {
-		if (c && c->mon && is_scroller_layout(c->mon) && !INSIDEMON(c)) {
+		if (c && c->mon && ISSCROLLTILED(c) && is_scroller_layout(c->mon) &&
+			!INSIDEMON(c)) {
 			should_lock = true;
 		}
 
 		if (!((!config.edge_scroller_pointer_focus ||
 			   speed < config.edge_scroller_focus_allow_speed) &&
-			  c && c->mon && is_scroller_layout(c->mon) && !INSIDEMON(c))) {
+			  c && c->mon && ISSCROLLTILED(c) && is_scroller_layout(c->mon) &&
+			  !INSIDEMON(c))) {
 			pointerfocus(c, surface, sx, sy, time);
 		}
 
