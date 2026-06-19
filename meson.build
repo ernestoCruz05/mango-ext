@@ -111,6 +111,7 @@ executable('mango-ext',
     cjson_dep,
   ],
   install : true,
+  install_rpath : get_option('install_rpath'),
   c_args : c_args,
   link_args : link_args,
 )

@@ -218,7 +218,19 @@ enum {
 }; /* EWMH atoms */
 #endif
 enum { UP, DOWN, LEFT, RIGHT, UNDIR }; /* smartmovewin */
-enum { NONE, OPEN, MOVE, CLOSE, TAG, FOCUS, OPAFADEIN, OPAFADEOUT, CANVAS_PAN, CANVAS_ZOOM, OVERVIEW };
+enum {
+	NONE,
+	OPEN,
+	MOVE,
+	CLOSE,
+	TAG,
+	FOCUS,
+	OPAFADEIN,
+	OPAFADEOUT,
+	CANVAS_PAN,
+	CANVAS_ZOOM,
+	OVERVIEW
+};
 enum { UNFOLD, FOLD, INVALIDFOLD };
 enum { PREV, NEXT };
 enum { STATE_UNSPECIFIED = 0, STATE_ENABLED, STATE_DISABLED };
@@ -586,17 +598,17 @@ struct Monitor {
 	bool canvas_overview_closing;	// true while animating out
 	float canvas_overview_progress; // 0.0 = hidden, 1.0 = fully visible
 	uint32_t canvas_overview_anim_start;
-	bool     canvas_pan_anim_active;
-	float    canvas_pan_anim_start_x, canvas_pan_anim_start_y;
-	float    canvas_pan_anim_target_x, canvas_pan_anim_target_y;
+	bool canvas_pan_anim_active;
+	float canvas_pan_anim_start_x, canvas_pan_anim_start_y;
+	float canvas_pan_anim_target_x, canvas_pan_anim_target_y;
 	uint32_t canvas_pan_anim_start_ms;
-	bool     canvas_zoom_anim_active;
-	float    canvas_zoom_anim_start_zoom;
-	float    canvas_zoom_anim_target_zoom;
-	float    canvas_zoom_anim_start_pan_x;
-	float    canvas_zoom_anim_target_pan_x;
-	float    canvas_zoom_anim_start_pan_y;
-	float    canvas_zoom_anim_target_pan_y;
+	bool canvas_zoom_anim_active;
+	float canvas_zoom_anim_start_zoom;
+	float canvas_zoom_anim_target_zoom;
+	float canvas_zoom_anim_start_pan_x;
+	float canvas_zoom_anim_target_pan_x;
+	float canvas_zoom_anim_start_pan_y;
+	float canvas_zoom_anim_target_pan_y;
 	uint32_t canvas_zoom_anim_start_ms;
 	struct wlr_scene_output *scene_output;
 	struct wlr_output_state pending;
@@ -1139,9 +1151,10 @@ struct Pertag {
 	float canvas_pan_x[LENGTH(tags) + 1];
 	float canvas_pan_y[LENGTH(tags) + 1];
 	float canvas_zoom[LENGTH(tags) + 1]; /* visual zoom factor, 1.0 = no zoom */
-	float    canvas_anchor_x[LENGTH(tags) + 1][9];
-	float    canvas_anchor_y[LENGTH(tags) + 1][9];
-	uint16_t canvas_anchor_valid[LENGTH(tags) + 1]; /* bitmask: bit N = anchor N set */
+	float canvas_anchor_x[LENGTH(tags) + 1][9];
+	float canvas_anchor_y[LENGTH(tags) + 1][9];
+	uint16_t canvas_anchor_valid[LENGTH(tags) +
+								 1]; /* bitmask: bit N = anchor N set */
 	struct DwindleNode *dwindle_root[LENGTH(tags) + 1];
 	struct TagScrollerState *scroller_state[LENGTH(tags) + 1];
 };
@@ -1217,6 +1230,11 @@ static struct wl_event_source *sync_keymap;
 #include "animation/tag.h"
 static void canvas_reposition(Monitor *m);
 static void canvas_pan_to_client(Monitor *m, Client *c);
+#include "dispatch/bind_define.h"
+#include "dispatch/gesture.h"
+#include "ext-protocol/all.h"
+#include "fetch/fetch.h"
+#include "ipc/ipc.h"
 #include "layout/arrange.h"
 #include "layout/canvas.h"
 #include "layout/dwindle.h"
@@ -1224,11 +1242,6 @@ static void canvas_pan_to_client(Monitor *m, Client *c);
 #include "layout/overview.h"
 #include "layout/scroll.h"
 #include "layout/vertical.h"
-#include "dispatch/bind_define.h"
-#include "dispatch/gesture.h"
-#include "ext-protocol/all.h"
-#include "fetch/fetch.h"
-#include "ipc/ipc.h"
 
 void client_change_mon(Client *c, Monitor *m) {
 	setmon(c, m, c->tags, true);
@@ -2305,8 +2318,8 @@ static CanvasGestureAction canvas_pinch_action = CANVAS_ACTION_PAN;
 static bool canvas_pinch_engaged = false;
 static float canvas_pinch_sensitivity = 1.0f;
 
-static const CanvasGestureBinding *
-canvas_gesture_lookup(CanvasGestureType type, int32_t fingers) {
+static const CanvasGestureBinding *canvas_gesture_lookup(CanvasGestureType type,
+														 int32_t fingers) {
 	int32_t i;
 	for (i = 0; i < config.canvas_gesture_bindings_count; i++) {
 		CanvasGestureBinding *b = &config.canvas_gesture_bindings[i];
@@ -3704,7 +3717,8 @@ void createmon(struct wl_listener *listener, void *data) {
 
 	if (chvt_backup_tag &&
 		regex_match(chvt_backup_selmon, m->wlr_output->name)) {
-		m->tagset[0] = m->tagset[1] = (1 << (chvt_backup_tag - 1)) & effective_tagmask;
+		m->tagset[0] = m->tagset[1] =
+			(1 << (chvt_backup_tag - 1)) & effective_tagmask;
 		m->pertag->curtag = m->pertag->prevtag = chvt_backup_tag;
 		chvt_backup_tag = 0;
 		memset(chvt_backup_selmon, 0, sizeof(chvt_backup_selmon));
@@ -4180,6 +4194,13 @@ void focusclient(Client *c, int32_t lift) {
 	if (c && client_surface(c) == old_keyboard_focus_surface && selmon &&
 		selmon->sel)
 		return;
+
+#ifdef XWAYLAND
+	if (config.xwayland_persistent_focus_restack && c && client_is_x11(c)) {
+		wlr_xwayland_surface_restack(c->surface.xwayland, NULL,
+									 XCB_STACK_MODE_ABOVE);
+	}
+#endif
 
 	if (selmon && selmon->sel && selmon->sel != c &&
 		selmon->sel->foreign_toplevel) {
@@ -5821,10 +5842,14 @@ void rendermon(struct wl_listener *listener, void *data) {
 			for (int ai = 0; ai < 9; ai++) {
 				if (!(valid & (1 << ai)))
 					continue;
-				int ax = (int)((m->pertag->canvas_anchor_x[tag][ai] - min_x) * scale) - 3;
-				int ay = (int)((m->pertag->canvas_anchor_y[tag][ai] - min_y) * scale) - 3;
-				struct wlr_scene_rect *ar =
-					wlr_scene_rect_create(minimap_scene_tree, 6, 6, anchor_colors[ai]);
+				int ax = (int)((m->pertag->canvas_anchor_x[tag][ai] - min_x) *
+							   scale) -
+						 3;
+				int ay = (int)((m->pertag->canvas_anchor_y[tag][ai] - min_y) *
+							   scale) -
+						 3;
+				struct wlr_scene_rect *ar = wlr_scene_rect_create(
+					minimap_scene_tree, 6, 6, anchor_colors[ai]);
 				wlr_scene_node_set_position(&ar->node, ax, ay);
 			}
 		}
@@ -5869,9 +5894,8 @@ void rendermon(struct wl_listener *listener, void *data) {
 		uint32_t tag = m->pertag->curtag;
 		uint32_t anim_duration = config.animation_duration_canvas_pan;
 		uint32_t elapsed = get_now_in_ms() - m->canvas_pan_anim_start_ms;
-		float raw_t = anim_duration
-			? (float)elapsed / (float)anim_duration
-			: 1.0f;
+		float raw_t =
+			anim_duration ? (float)elapsed / (float)anim_duration : 1.0f;
 		if (raw_t > 1.0f)
 			raw_t = 1.0f;
 
@@ -5901,9 +5925,8 @@ void rendermon(struct wl_listener *listener, void *data) {
 		uint32_t tag = m->pertag->curtag;
 		uint32_t anim_duration = config.animation_duration_canvas_zoom;
 		uint32_t elapsed = get_now_in_ms() - m->canvas_zoom_anim_start_ms;
-		double raw_t = anim_duration
-			? (double)elapsed / (double)anim_duration
-			: 1.0;
+		double raw_t =
+			anim_duration ? (double)elapsed / (double)anim_duration : 1.0;
 		if (raw_t > 1.0)
 			raw_t = 1.0;
 
@@ -5911,13 +5934,16 @@ void rendermon(struct wl_listener *listener, void *data) {
 
 		m->pertag->canvas_zoom[tag] =
 			m->canvas_zoom_anim_start_zoom +
-			(m->canvas_zoom_anim_target_zoom - m->canvas_zoom_anim_start_zoom) * t;
-		m->pertag->canvas_pan_x[tag] =
-			m->canvas_zoom_anim_start_pan_x +
-			(m->canvas_zoom_anim_target_pan_x - m->canvas_zoom_anim_start_pan_x) * t;
-		m->pertag->canvas_pan_y[tag] =
-			m->canvas_zoom_anim_start_pan_y +
-			(m->canvas_zoom_anim_target_pan_y - m->canvas_zoom_anim_start_pan_y) * t;
+			(m->canvas_zoom_anim_target_zoom - m->canvas_zoom_anim_start_zoom) *
+				t;
+		m->pertag->canvas_pan_x[tag] = m->canvas_zoom_anim_start_pan_x +
+									   (m->canvas_zoom_anim_target_pan_x -
+										m->canvas_zoom_anim_start_pan_x) *
+										   t;
+		m->pertag->canvas_pan_y[tag] = m->canvas_zoom_anim_start_pan_y +
+									   (m->canvas_zoom_anim_target_pan_y -
+										m->canvas_zoom_anim_start_pan_y) *
+										   t;
 
 		canvas_reposition(m);
 
@@ -5980,14 +6006,18 @@ void rendermon(struct wl_listener *listener, void *data) {
 			float cx = cursor->x - overview_tree_x;
 			float cy = cursor->y - overview_tree_y;
 			if (cx >= 0 && cx < m->m.width && cy >= 0 && cy < m->m.height) {
-				float canvas_cx = cx / canvas_overview_scale + overview_canvas_min_x;
-				float canvas_cy = cy / canvas_overview_scale + overview_canvas_min_y;
+				float canvas_cx =
+					cx / canvas_overview_scale + overview_canvas_min_x;
+				float canvas_cy =
+					cy / canvas_overview_scale + overview_canvas_min_y;
 				pan_x = canvas_cx - (m->w.width / zoom) / 2.0f;
 				pan_y = canvas_cy - (m->w.height / zoom) / 2.0f;
 			}
 
-			int vp_x = (int)((pan_x - overview_canvas_min_x) * canvas_overview_scale);
-			int vp_y = (int)((pan_y - overview_canvas_min_y) * canvas_overview_scale);
+			int vp_x =
+				(int)((pan_x - overview_canvas_min_x) * canvas_overview_scale);
+			int vp_y =
+				(int)((pan_y - overview_canvas_min_y) * canvas_overview_scale);
 			int vp_w = (int)((m->w.width / zoom) * canvas_overview_scale);
 			int vp_h = (int)((m->w.height / zoom) * canvas_overview_scale);
 			if (vp_w < 8)
@@ -6709,7 +6739,8 @@ void setfullscreen(Client *c, int32_t fullscreen) // 用自定义全屏代理自
 	if (c->isoverlay) {
 		wlr_scene_node_reparent(&c->scene->node, layers[LyrOverlay]);
 	} else if (client_should_overtop(c) && c->isfloating) {
-		wlr_scene_node_reparent(&c->scene->node, fullscreen ? layers[LyrTop] : layers[LyrFloat]);
+		wlr_scene_node_reparent(&c->scene->node,
+								fullscreen ? layers[LyrTop] : layers[LyrFloat]);
 	} else {
 		wlr_scene_node_reparent(
 			&c->scene->node,
@@ -7518,8 +7549,8 @@ void touchmotion(struct wl_listener *listener, void *data) {
 				}
 			}
 			if (other) {
-				double cur_dist = sqrt(pow(lx - other->end_x, 2) +
-									   pow(ly - other->end_y, 2));
+				double cur_dist =
+					sqrt(pow(lx - other->end_x, 2) + pow(ly - other->end_y, 2));
 				if (tg->pinch_dist > 1.0 && cur_dist > 1.0) {
 					float factor = (float)(cur_dist / tg->pinch_dist);
 					float old_zoom = zoom;
@@ -7744,7 +7775,8 @@ void overview_restore(Client *c, const Arg *arg) {
 	c->geom = c->overview_backup_geom;
 	c->bw = c->overview_backup_bw;
 	c->animation.tagining = false;
-	c->is_restoring_from_ov = (arg->ui & c->tags & effective_tagmask) == 0 ? true : false;
+	c->is_restoring_from_ov =
+		(arg->ui & c->tags & effective_tagmask) == 0 ? true : false;
 
 	if (c->overview_scene_surface) {
 		wlr_scene_node_destroy(&c->scene_surface->node);
@@ -8194,8 +8226,8 @@ void view_in_mon(const Arg *arg, bool want_animation, Monitor *m,
 		if (arg->ui == (~0 & effective_tagmask))
 			m->pertag->curtag = 0;
 		else {
-			for (i = 0; !(arg->ui & 1 << i) && i < effective_tags && arg->ui != 0;
-				 i++)
+			for (i = 0;
+				 !(arg->ui & 1 << i) && i < effective_tags && arg->ui != 0; i++)
 				;
 			m->pertag->curtag = i >= effective_tags ? effective_tags : i + 1;
 		}

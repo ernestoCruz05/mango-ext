@@ -1,2 +1,4 @@
 option('xwayland', type : 'feature', value : 'enabled')
 option('asan', type : 'boolean', value : false)
+# -Dinstall_rpath=/path/to/wlroots/build:/path/to/scenefx/build
+option('install_rpath', type : 'string', value : '')
