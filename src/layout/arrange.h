@@ -113,6 +113,31 @@ void set_size_per(Monitor *m, Client *c) {
 		c->master_inner_per = 1.0f;
 		c->stack_inner_per = 1.0f;
 	}
+
+	if (!c->iscustom_scroller_proportion) {
+		c->scroller_proportion =
+			m->pertag->scroller_default_proportion[m->pertag->curtag];
+	}
+
+	if (!c->iscustom_scroller_proportion_single) {
+		c->scroller_proportion_single =
+			m->pertag->scroller_default_proportion_single[m->pertag->curtag];
+	}
+}
+
+void monocle_set_focus(Client *c, bool focused) {
+
+	if (!c || !c->mon)
+		return;
+
+	c->is_monocle_hide = !focused;
+	mango_tab_bar_node_set_focus(c->tab_bar_node, focused);
+	wlr_scene_node_set_enabled(&c->scene->node, focused);
+
+	if (!focused) {
+		c->animation.current = c->animainit_geom = c->animation.initial =
+			c->pending = c->current = c->geom;
+	}
 }
 
 void resize_tile_master_horizontal(Client *grabc, bool isdrag, int32_t offsetx,
@@ -1217,6 +1242,20 @@ void pre_caculate_before_arrange(Monitor *m, bool want_animation,
 			set_size_per(m, c);
 		}
 
+		if (m->is_jump_mode && !c->jump_label_node) {
+			client_add_jump_label_node(c);
+		}
+
+		if (m->pertag->ltidxs[m->pertag->curtag]->id == MONOCLE &&
+			!c->tab_bar_node) {
+			client_add_tab_bar_node(c);
+		}
+
+		if (c->tab_bar_node && c->mon == m) {
+			wlr_scene_node_set_enabled(&c->tab_bar_node->scene_buffer->node,
+									   false);
+		}
+
 		if (c->mon == m && (c->isglobal || c->isunglobal)) {
 			c->tags = m->tagset[m->seltags];
 		}
@@ -1326,6 +1365,10 @@ arrange(Monitor *m, bool want_animation, bool from_view) {
 		m->pertag->canvas_pan_x[tag] = m->canvas_saved_pan_x;
 		m->pertag->canvas_pan_y[tag] = m->canvas_saved_pan_y;
 		m->canvas_in_overview = false;
+	}
+
+	if (!m->sel) {
+		m->sel = focustop(m);
 	}
 
 	pre_caculate_before_arrange(m, want_animation, from_view, false);

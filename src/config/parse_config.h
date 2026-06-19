@@ -195,6 +195,9 @@ typedef struct {
 	char *monitor_serial;
 	float mfact;
 	int32_t nmaster;
+	float scroller_default_proportion;
+	float scroller_default_proportion_single;
+	int32_t scroller_ignore_proportion_single;
 	int32_t no_render_border;
 	int32_t open_as_floating;
 	int32_t no_hide;
@@ -290,6 +293,7 @@ typedef struct {
 	int32_t enable_hotarea;
 	int32_t ov_tab_mode;
 	int32_t ov_no_resize;
+
 	int32_t overviewgappi;
 	int32_t overviewgappo;
 	uint32_t cursor_hide_timeout;
@@ -376,6 +380,7 @@ typedef struct {
 	int32_t canvas_anchor_animate;
 	int32_t tag_carousel;
 	int32_t max_tags;
+	uint32_t tab_bar_height;
 	float scratchpad_width_ratio;
 	float scratchpad_height_ratio;
 	float rootcolor[4];
@@ -458,6 +463,8 @@ typedef struct {
 
 	struct xkb_context *ctx;
 	struct xkb_keymap *keymap;
+	DecorateDrawData jumplabeldata;
+	DecorateDrawData tabdata;
 } Config;
 
 typedef int32_t (*FuncType)(const Arg *);
@@ -1166,6 +1173,9 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 		func = toggleglobal;
 	} else if (strcmp(func_name, "toggleoverview") == 0) {
 		func = toggleoverview;
+		(*arg).i = atoi(arg_value);
+	} else if (strcmp(func_name, "togglejump") == 0) {
+		func = togglejump;
 		(*arg).i = atoi(arg_value);
 	} else if (strcmp(func_name, "set_proportion") == 0) {
 		func = set_proportion;
@@ -1942,6 +1952,146 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->cursor_size = atoi(value);
 	} else if (strcmp(key, "cursor_theme") == 0) {
 		config->cursor_theme = strdup(value);
+	} else if (strcmp(key, "tab_bar_decorate_font_desc") == 0) {
+		config->tabdata.font_desc = strdup(value);
+	} else if (strcmp(key, "tab_bar_decorate_fg_color") == 0) {
+		int64_t color = parse_color(value);
+		if (color == -1) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Invalid "
+					"tab_bar_decorate_fg_color "
+					"format: %s\n",
+					value);
+			return false;
+		} else {
+			convert_hex_to_rgba(config->tabdata.fg_color, color);
+		}
+	} else if (strcmp(key, "tab_bar_decorate_bg_color") == 0) {
+		int64_t color = parse_color(value);
+		if (color == -1) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Invalid "
+					"tab_bar_decorate_bg_color "
+					"format: %s\n",
+					value);
+			return false;
+		} else {
+			convert_hex_to_rgba(config->tabdata.bg_color, color);
+		}
+	} else if (strcmp(key, "tab_bar_decorate_focus_fg_color") == 0) {
+		int64_t color = parse_color(value);
+		if (color == -1) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Invalid "
+					"tab_bar_decorate_focus_fg_color "
+					"format: %s\n",
+					value);
+			return false;
+		} else {
+			convert_hex_to_rgba(config->tabdata.focus_fg_color, color);
+		}
+	} else if (strcmp(key, "tab_bar_decorate_focus_bg_color") == 0) {
+		int64_t color = parse_color(value);
+		if (color == -1) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Invalid "
+					"tab_bar_decorate_focus_bg_color "
+					"format: %s\n",
+					value);
+			return false;
+		} else {
+			convert_hex_to_rgba(config->tabdata.focus_bg_color, color);
+		}
+	} else if (strcmp(key, "tab_bar_decorate_border_color") == 0) {
+		int64_t color = parse_color(value);
+		if (color == -1) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Invalid "
+					"tab_bar_decorate_border_color "
+					"format: %s\n",
+					value);
+			return false;
+		} else {
+			convert_hex_to_rgba(config->tabdata.border_color, color);
+		}
+	} else if (strcmp(key, "tab_bar_decorate_border_width") == 0) {
+		config->tabdata.border_width = CLAMP_INT(atoi(value), 0, 100);
+	} else if (strcmp(key, "tab_bar_decorate_corner_radius") == 0) {
+		config->tabdata.corner_radius = CLAMP_INT(atoi(value), 0, 100);
+	} else if (strcmp(key, "tab_bar_decorate_padding_x") == 0) {
+		config->tabdata.padding_x = CLAMP_INT(atoi(value), 0, 100);
+	} else if (strcmp(key, "tab_bar_decorate_padding_y") == 0) {
+		config->tabdata.padding_y = CLAMP_INT(atoi(value), 0, 100);
+	} else if (strcmp(key, "jump_label_decorate_font_desc") == 0) {
+		config->jumplabeldata.font_desc = strdup(value);
+	} else if (strcmp(key, "jump_label_decorate_fg_color") == 0) {
+		int64_t color = parse_color(value);
+		if (color == -1) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Invalid "
+					"jump_label_decorate_fg_color "
+					"format: %s\n",
+					value);
+			return false;
+		} else {
+			convert_hex_to_rgba(config->jumplabeldata.fg_color, color);
+		}
+	} else if (strcmp(key, "jump_label_decorate_bg_color") == 0) {
+		int64_t color = parse_color(value);
+		if (color == -1) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Invalid "
+					"jump_label_decorate_bg_color "
+					"format: %s\n",
+					value);
+			return false;
+		} else {
+			convert_hex_to_rgba(config->jumplabeldata.bg_color, color);
+		}
+	} else if (strcmp(key, "jump_label_decorate_focus_fg_color") == 0) {
+		int64_t color = parse_color(value);
+		if (color == -1) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Invalid "
+					"jump_label_decorate_focus_fg_color "
+					"format: %s\n",
+					value);
+			return false;
+		} else {
+			convert_hex_to_rgba(config->jumplabeldata.focus_fg_color, color);
+		}
+	} else if (strcmp(key, "jump_label_decorate_focus_bg_color") == 0) {
+		int64_t color = parse_color(value);
+		if (color == -1) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Invalid "
+					"jump_label_decorate_focus_bg_color "
+					"format: %s\n",
+					value);
+			return false;
+		} else {
+			convert_hex_to_rgba(config->jumplabeldata.focus_bg_color, color);
+		}
+	} else if (strcmp(key, "jump_label_decorate_border_color") == 0) {
+		int64_t color = parse_color(value);
+		if (color == -1) {
+			fprintf(stderr,
+					"\033[1m\033[31m[ERROR]:\033[33m Invalid "
+					"jump_label_decorate_border_color "
+					"format: %s\n",
+					value);
+			return false;
+		} else {
+			convert_hex_to_rgba(config->jumplabeldata.border_color, color);
+		}
+	} else if (strcmp(key, "jump_label_decorate_border_width") == 0) {
+		config->jumplabeldata.border_width = CLAMP_INT(atoi(value), 0, 100);
+	} else if (strcmp(key, "jump_label_decorate_corner_radius") == 0) {
+		config->jumplabeldata.corner_radius = CLAMP_INT(atoi(value), 0, 100);
+	} else if (strcmp(key, "jump_label_decorate_padding_x") == 0) {
+		config->jumplabeldata.padding_x = CLAMP_INT(atoi(value), 0, 100);
+	} else if (strcmp(key, "jump_label_decorate_padding_y") == 0) {
+		config->jumplabeldata.padding_y = CLAMP_INT(atoi(value), 0, 100);
 	} else if (strcmp(key, "disable_while_typing") == 0) {
 		config->disable_while_typing = atoi(value);
 	} else if (strcmp(key, "left_handed") == 0) {
@@ -2014,6 +2164,8 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->tag_carousel = atoi(value);
 	} else if (strcmp(key, "max_tags") == 0) {
 		config->max_tags = atoi(value);
+	} else if (strcmp(key, "tab_bar_height") == 0) {
+		config->tab_bar_height = atoi(value);
 	} else if (strcmp(key, "rootcolor") == 0) {
 		int64_t color = parse_color(value);
 		if (color == -1) {
@@ -2254,6 +2406,9 @@ bool parse_option(Config *config, char *key, char *value) {
 		rule->no_render_border = 0;
 		rule->open_as_floating = 0;
 		rule->no_hide = 0;
+		rule->scroller_default_proportion = 0.0f;
+		rule->scroller_default_proportion_single = 0.0f;
+		rule->scroller_ignore_proportion_single = -1;
 
 		bool parse_error = false;
 		char *token = strtok(value, ",");
@@ -2289,6 +2444,17 @@ bool parse_option(Config *config, char *key, char *value) {
 					rule->nmaster = CLAMP_INT(atoi(val), 1, 99);
 				} else if (strcmp(key, "mfact") == 0) {
 					rule->mfact = CLAMP_FLOAT(atof(val), 0.1f, 0.9f);
+				} else if (strcmp(key, "scroller_default_proportion") == 0) {
+					rule->scroller_default_proportion =
+						CLAMP_FLOAT(atof(val), 0.0f, 1.0f);
+				} else if (strcmp(key, "scroller_default_proportion_single") ==
+						   0) {
+					rule->scroller_default_proportion_single =
+						CLAMP_FLOAT(atof(val), 0.0f, 1.0f);
+				} else if (strcmp(key, "scroller_ignore_proportion_single") ==
+						   0) {
+					rule->scroller_ignore_proportion_single =
+						CLAMP_INT(atoi(val), 0, 1);
 				} else {
 					fprintf(stderr,
 							"\033[1m\033[31m[ERROR]:\033[33m Unknown "
@@ -3659,6 +3825,16 @@ void free_config(void) {
 		config.cursor_theme = NULL;
 	}
 
+	if (config.jumplabeldata.font_desc) {
+		free((void *)config.jumplabeldata.font_desc);
+		config.jumplabeldata.font_desc = NULL;
+	}
+
+	if (config.tabdata.font_desc) {
+		free((void *)config.tabdata.font_desc);
+		config.tabdata.font_desc = NULL;
+	}
+
 	if (config.tablet_map_to_mon) {
 		free(config.tablet_map_to_mon);
 		config.tablet_map_to_mon = NULL;
@@ -3842,6 +4018,7 @@ void override_config(void) {
 	config.scratchpad_height_ratio =
 		CLAMP_FLOAT(config.scratchpad_height_ratio, 0.1f, 1.0f);
 	config.borderpx = CLAMP_INT(config.borderpx, 0, 200);
+	config.tab_bar_height = CLAMP_INT(config.tab_bar_height, 0, 500);
 	config.smartgaps = CLAMP_INT(config.smartgaps, 0, 1);
 	config.blur = CLAMP_INT(config.blur, 0, 1);
 	config.blur_layer = CLAMP_INT(config.blur_layer, 0, 1);
@@ -3869,6 +4046,22 @@ void override_config(void) {
 	config.focused_opacity = CLAMP_FLOAT(config.focused_opacity, 0.0f, 1.0f);
 	config.unfocused_opacity =
 		CLAMP_FLOAT(config.unfocused_opacity, 0.0f, 1.0f);
+
+	config.tabdata.border_width =
+		CLAMP_INT(config.tabdata.border_width, 0, 100);
+	config.tabdata.corner_radius =
+		CLAMP_INT(config.tabdata.corner_radius, 0, 100);
+	config.tabdata.padding_x = CLAMP_INT(config.tabdata.padding_x, 0, 100);
+	config.tabdata.padding_y = CLAMP_INT(config.tabdata.padding_y, 0, 100);
+
+	config.jumplabeldata.border_width =
+		CLAMP_INT(config.jumplabeldata.border_width, 0, 100);
+	config.jumplabeldata.corner_radius =
+		CLAMP_INT(config.jumplabeldata.corner_radius, 0, 100);
+	config.jumplabeldata.padding_x =
+		CLAMP_INT(config.jumplabeldata.padding_x, 0, 100);
+	config.jumplabeldata.padding_y =
+		CLAMP_INT(config.jumplabeldata.padding_y, 0, 100);
 }
 
 void set_value_default() {
@@ -3910,7 +4103,6 @@ void set_value_default() {
 	config.log_level = WLR_ERROR;
 	config.numlockon = 0;
 	config.capslock = 0;
-
 	config.ov_tab_mode = 1;
 	config.ov_no_resize = 1;
 	config.hotarea_size = 10;
@@ -3990,6 +4182,7 @@ void set_value_default() {
 	};
 	config.tag_carousel = 0;
 	config.max_tags = LENGTH(tags);
+	config.tab_bar_height = 50;
 	config.overviewgappi = 5;
 	config.overviewgappo = 30;
 	config.cursor_hide_timeout = 0;
@@ -4084,6 +4277,56 @@ void set_value_default() {
 	config.animation_curve_canvas_zoom[1] = 1.0;
 	config.animation_curve_canvas_zoom[2] = 0.29;
 	config.animation_curve_canvas_zoom[3] = 0.99;
+
+	config.tabdata.fg_color[0] = 0xc4 / 255.0f;
+	config.tabdata.fg_color[1] = 0x93 / 255.0f;
+	config.tabdata.fg_color[2] = 0x9d / 255.0f;
+	config.tabdata.fg_color[3] = 1.0f;
+	config.tabdata.bg_color[0] = 0x32 / 255.0f;
+	config.tabdata.bg_color[1] = 0x32 / 255.0f;
+	config.tabdata.bg_color[2] = 0x32 / 255.0f;
+	config.tabdata.bg_color[3] = 1.0f;
+	config.tabdata.focus_fg_color[0] = 0xed / 255.0f;
+	config.tabdata.focus_fg_color[1] = 0xa6 / 255.0f;
+	config.tabdata.focus_fg_color[2] = 0xb4 / 255.0f;
+	config.tabdata.focus_fg_color[3] = 1.0f;
+	config.tabdata.focus_bg_color[0] = 0x4e / 255.0f;
+	config.tabdata.focus_bg_color[1] = 0x45 / 255.0f;
+	config.tabdata.focus_bg_color[2] = 0x3c / 255.0f;
+	config.tabdata.focus_bg_color[3] = 1.0f;
+	config.tabdata.border_color[0] = 0x8b / 255.0f;
+	config.tabdata.border_color[1] = 0xaa / 255.0f;
+	config.tabdata.border_color[2] = 0x9b / 255.0f;
+	config.tabdata.border_color[3] = 1.0f;
+	config.tabdata.border_width = 4;
+	config.tabdata.corner_radius = 5;
+	config.tabdata.padding_x = 0;
+	config.tabdata.padding_y = 0;
+
+	config.jumplabeldata.fg_color[0] = 0xc4 / 255.0f;
+	config.jumplabeldata.fg_color[1] = 0x93 / 255.0f;
+	config.jumplabeldata.fg_color[2] = 0x9d / 255.0f;
+	config.jumplabeldata.fg_color[3] = 1.0f;
+	config.jumplabeldata.bg_color[0] = 0x32 / 255.0f;
+	config.jumplabeldata.bg_color[1] = 0x32 / 255.0f;
+	config.jumplabeldata.bg_color[2] = 0x32 / 255.0f;
+	config.jumplabeldata.bg_color[3] = 1.0f;
+	config.jumplabeldata.focus_fg_color[0] = 0xed / 255.0f;
+	config.jumplabeldata.focus_fg_color[1] = 0xa6 / 255.0f;
+	config.jumplabeldata.focus_fg_color[2] = 0xb4 / 255.0f;
+	config.jumplabeldata.focus_fg_color[3] = 1.0f;
+	config.jumplabeldata.focus_bg_color[0] = 0x4e / 255.0f;
+	config.jumplabeldata.focus_bg_color[1] = 0x45 / 255.0f;
+	config.jumplabeldata.focus_bg_color[2] = 0x3c / 255.0f;
+	config.jumplabeldata.focus_bg_color[3] = 1.0f;
+	config.jumplabeldata.border_color[0] = 0x8b / 255.0f;
+	config.jumplabeldata.border_color[1] = 0xaa / 255.0f;
+	config.jumplabeldata.border_color[2] = 0x9b / 255.0f;
+	config.jumplabeldata.border_color[3] = 1.0f;
+	config.jumplabeldata.border_width = 4;
+	config.jumplabeldata.corner_radius = 5;
+	config.jumplabeldata.padding_x = 10;
+	config.jumplabeldata.padding_y = 10;
 
 	config.rootcolor[0] = 0x32 / 255.0f;
 	config.rootcolor[1] = 0x32 / 255.0f;
@@ -4202,6 +4445,8 @@ bool parse_config(void) {
 	config.tag_rules = NULL;
 	config.tag_rules_count = 0;
 	config.cursor_theme = NULL;
+	config.jumplabeldata.font_desc = NULL;
+	config.tabdata.font_desc = NULL;
 	config.tablet_map_to_mon = NULL;
 	strcpy(config.keymode, "default");
 
@@ -4368,6 +4613,10 @@ void reapply_property(void) {
 				c->bw = config.borderpx;
 			}
 
+			mango_jump_label_node_apply_config(c->jump_label_node,
+											   &config.jumplabeldata);
+			mango_tab_bar_node_apply_config(c->tab_bar_node, &config.tabdata);
+
 			wlr_scene_rect_set_color(c->droparea, config.dropcolor);
 			wlr_scene_rect_set_color(c->splitindicator[0], config.splitcolor);
 			wlr_scene_rect_set_color(c->splitindicator[1], config.splitcolor);
@@ -4430,6 +4679,12 @@ void parse_tagrule(Monitor *m) {
 	for (i = 0; i <= LENGTH(tags); i++) {
 		m->pertag->nmasters[i] = config.default_nmaster;
 		m->pertag->mfacts[i] = config.default_mfact;
+		m->pertag->scroller_default_proportion[i] =
+			config.scroller_default_proportion;
+		m->pertag->scroller_default_proportion_single[i] =
+			config.scroller_default_proportion_single;
+		m->pertag->scroller_ignore_proportion_single[i] =
+			config.scroller_ignore_proportion_single;
 	}
 
 	for (i = 0; i < config.tag_rules_count; i++) {
@@ -4484,6 +4739,15 @@ void parse_tagrule(Monitor *m) {
 				m->pertag->no_render_border[tr.id] = tr.no_render_border;
 			if (tr.open_as_floating >= 0)
 				m->pertag->open_as_floating[tr.id] = tr.open_as_floating;
+			if (tr.scroller_default_proportion > 0.0f)
+				m->pertag->scroller_default_proportion[tr.id] =
+					tr.scroller_default_proportion;
+			if (tr.scroller_default_proportion_single > 0.0f)
+				m->pertag->scroller_default_proportion_single[tr.id] =
+					tr.scroller_default_proportion_single;
+			if (tr.scroller_ignore_proportion_single >= 0)
+				m->pertag->scroller_ignore_proportion_single[tr.id] =
+					tr.scroller_ignore_proportion_single;
 		}
 	}
 

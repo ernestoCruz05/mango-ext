@@ -52,6 +52,39 @@ You can also color-code windows based on their state:
 
 > **Tip:** For scratchpad window sizing, see [Scratchpad](/docs/window-management/scratchpad) configuration.
 
+### Overview Jump Mode
+| Setting | Default | Description |
+| :--- | :--- | :--- |
+| `jump_label_decorate_fg_color` | `0xc4939dff` | text color. |
+| `jump_label_decorate_bg_color` | `0x201b14ff` | background color.|
+| `jump_label_decorate_focus_fg_color` | `0x201b14ff` |  text color for focus. |
+| `jump_label_decorate_focus_bg_color` | `0xc4939dff` | background color for focus.|
+| `jump_label_decorate_border_color` | `0x8BAA9Bff` | border color.|
+| `jump_label_decorate_border_width` | `4` | border width.|
+| `jump_label_decorate_corner_radius` | `5` | corner radius.|
+| `jump_label_decorate_padding_x` | `10` | horizontal padding.|
+| `jump_label_decorate_padding_y` | `10` | vertical padding.|
+| `jump_label_decorate_font_desc` | `monospace Bold 16` | font set.|
+
+### Tab Bar For Monocle Layout
+| Setting | Default | Description |
+| :--- | :--- | :--- |
+| `tab_bar_height` | `50` | Height of the tab bar for monocle layout. |
+| `tab_bar_decorate_fg_color` | `0xc4939dff` | text color.
+| `tab_bar_decorate_bg_color` | `0x201b14ff` | background color.|
+| `tab_bar_decorate_focus_fg_color` | `0x201b14ff` | text color for focus. |
+| `tab_bar_decorate_focus_bg_color` | `0xc4939dff` | background color for focus.|
+| `tab_bar_decorate_border_color` | `0x8BAA9Bff` | border color.|
+| `tab_bar_decorate_border_width` | `4` | border width.|
+| `tab_bar_decorate_corner_radius` | `5` | corner radius.|
+| `tab_bar_decorate_padding_x` | `0` | horizontal padding.|
+| `tab_bar_decorate_padding_y` | `0` | vertical padding.|
+| `tab_bar_decorate_font_desc` | `monospace Bold 16` | font set.|
+
+## Borders
+
+Control the appearance of window borders.
+
 ## Cursor Theme
 
 Set the size and theme of your mouse cursor.

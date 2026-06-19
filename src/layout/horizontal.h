@@ -62,7 +62,7 @@ void tile(Monitor *m) {
 		if (!VISIBLEON(c, m) || !ISFAKETILED(c))
 			continue;
 		if (i < m->pertag->nmasters[m->pertag->curtag]) {
-			r = MIN(n, m->pertag->nmasters[m->pertag->curtag]) - i;
+			r = MANGO_MIN(n, m->pertag->nmasters[m->pertag->curtag]) - i;
 			if (c->master_inner_per > 0.0f) {
 				h = master_surplus_height * c->master_inner_per /
 					master_surplus_ratio;
@@ -179,7 +179,7 @@ void right_tile(Monitor *m) {
 		if (!VISIBLEON(c, m) || !ISFAKETILED(c))
 			continue;
 		if (i < m->pertag->nmasters[m->pertag->curtag]) {
-			r = MIN(n, m->pertag->nmasters[m->pertag->curtag]) - i;
+			r = MANGO_MIN(n, m->pertag->nmasters[m->pertag->curtag]) - i;
 			if (c->master_inner_per > 0.0f) {
 				h = master_surplus_height * c->master_inner_per /
 					master_surplus_ratio;
@@ -345,7 +345,7 @@ void center_tile(Monitor *m) {
 
 		if (i < nmasters) {
 			// 主区域窗口
-			r = MIN(n, nmasters) - i;
+			r = MANGO_MIN(n, nmasters) - i;
 			if (c->master_inner_per > 0.0f) {
 				h = master_surplus_height * c->master_inner_per /
 					master_surplus_ratio;
@@ -518,8 +518,8 @@ void deck(Monitor *m) {
 			continue;
 		if (i < nmasters) {
 			c->master_mfact_per = mfact;
-			int32_t h =
-				(m->w.height - 2 * cur_gappov - my) / (MIN(n, nmasters) - i);
+			int32_t h = (m->w.height - 2 * cur_gappov - my) /
+						(MANGO_MIN(n, nmasters) - i);
 			client_tile_resize(c,
 							   (struct wlr_box){.x = m->w.x + cur_gappoh,
 												.y = m->w.y + cur_gappov + my,
@@ -545,32 +545,83 @@ void deck(Monitor *m) {
 	}
 }
 
-void // 17
-monocle(Monitor *m) {
-	Client *c = NULL;
+void monocle(Monitor *m) {
+	Client *c = NULL, *fc = NULL;
 	struct wlr_box geom;
-
 	int32_t cur_gappov = enablegaps ? m->gappov : 0;
 	int32_t cur_gappoh = enablegaps ? m->gappoh : 0;
+	int32_t cur_gapiv = enablegaps ? m->gappiv : 0;
+	int32_t cur_gapih = enablegaps ? m->gappih : 0;
 
-	cur_gappoh = config.smartgaps && m->visible_fake_tiling_clients == 1
-					 ? 0
-					 : cur_gappoh;
-	cur_gappov = config.smartgaps && m->visible_fake_tiling_clients == 1
-					 ? 0
-					 : cur_gappov;
+	if (config.smartgaps && m->visible_fake_tiling_clients == 1) {
+		cur_gappov = cur_gappoh = cur_gapiv = cur_gapih = 0;
+	}
 
-	wl_list_for_each(c, &clients, link) {
-		if (!VISIBLEON(c, m) || !ISFAKETILED(c))
+	int n = m->visible_fake_tiling_clients;
+	if (n == 0)
+		return;
+
+	wl_list_for_each(c, &fstack, flink) {
+		if (c->iskilling || c->isunglobal || !ISFAKETILED(c))
 			continue;
+		if (VISIBLEON(c, m)) {
+			fc = c;
+			break;
+		}
+	}
+
+	if (n == 1) {
 		geom.x = m->w.x + cur_gappoh;
 		geom.y = m->w.y + cur_gappov;
 		geom.width = m->w.width - 2 * cur_gappoh;
 		geom.height = m->w.height - 2 * cur_gappov;
-		client_tile_resize(c, geom, 0);
+		client_tile_resize(fc, geom, 0);
+		monocle_set_focus(fc, true);
+		return;
 	}
-	if ((c = focustop(m)))
-		wlr_scene_node_raise_to_top(&c->scene->node);
+
+	int tab_bar_height = config.tab_bar_height;
+
+	int tab_bar_inner_gap_height =
+		config.tab_bar_height > 0 ? 2 * cur_gapiv : 0;
+	int tab_bar_y_offset = config.tab_bar_height > 0 ? cur_gapiv : 0;
+
+	int tab_y = m->w.y + cur_gappov;
+	int main_y = tab_y + tab_bar_height + tab_bar_y_offset;
+	int main_height = m->w.height - 2 * cur_gappov - tab_bar_inner_gap_height -
+					  tab_bar_height;
+
+	int tab_area_width = m->w.width - 2 * cur_gappoh;
+
+	int total_gaps = (n - 1) * cur_gapih;
+	int base_width = (tab_area_width - total_gaps) / n;
+	int remainder = (tab_area_width - total_gaps) % n;
+
+	int tab_x = m->w.x + cur_gappoh;
+	int idx = 0;
+
+	wl_list_for_each(c, &clients, link) {
+		if (!VISIBLEON(c, m) || !ISFAKETILED(c))
+			continue;
+
+		if (c == fc) {
+			monocle_set_focus(c, true);
+		} else {
+			monocle_set_focus(c, false);
+		}
+
+		geom.x = m->w.x + cur_gappoh;
+		geom.y = main_y;
+		geom.width = m->w.width - 2 * cur_gappoh;
+		geom.height = main_height;
+		client_tile_resize(c, geom, 0);
+
+		int tw = base_width + (idx < remainder ? 1 : 0);
+		global_draw_tab_bar(c, tab_x, tab_y, tw, tab_bar_height);
+
+		tab_x += tw + cur_gapih;
+		idx++;
+	}
 }
 
 // 网格布局窗口大小和位置计算

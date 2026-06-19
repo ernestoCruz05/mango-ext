@@ -30,6 +30,14 @@ bool is_canvas_layout(Monitor *m) {
 	return m->pertag->ltidxs[m->pertag->curtag]->id == CANVAS;
 }
 
+bool is_monocle_layout(Monitor *m) {
+
+	if (m->pertag->ltidxs[m->pertag->curtag]->id == MONOCLE)
+		return true;
+
+	return false;
+}
+
 bool is_centertile_layout(Monitor *m) {
 
 	if (m->pertag->ltidxs[m->pertag->curtag]->id == CENTER_TILE)
