@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <strings.h>
 
 #ifndef SYSCONFDIR
 #define SYSCONFDIR "/etc"
@@ -156,6 +157,9 @@ typedef struct {
 	uint32_t fingers_count;
 	int32_t (*func)(const Arg *);
 	Arg arg;
+	bool continuous;
+	uint8_t axis;
+	bool have_client;
 } GestureBinding;
 
 typedef struct {
@@ -2973,6 +2977,19 @@ bool parse_option(Config *config, char *key, char *value) {
 		binding->arg.v2 = NULL;
 		binding->arg.v3 = NULL;
 		binding->arg.tc = NULL;
+
+		if (strcmp(func_name, "tagscrub") == 0) {
+			binding->continuous = true;
+			binding->func = NULL;
+			if (strcasecmp(motion_str, "vertical") == 0)
+				binding->axis = VERTICAL;
+			else
+				binding->axis = HORIZONTAL;
+			binding->have_client = (strcmp(arg_value, "have_client") == 0);
+			config->gesture_bindings_count++;
+			return true;
+		}
+
 		binding->func =
 			parse_func_name(func_name, &binding->arg, arg_value, arg_value2,
 							arg_value3, arg_value4, arg_value5);

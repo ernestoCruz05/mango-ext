@@ -1,0 +1,56 @@
+#ifndef TAG_SCRUB_MATH_H
+#define TAG_SCRUB_MATH_H
+#include <stdbool.h>
+#include <stdint.h>
+#define TAG_SCRUB_PROJECTION_FACTOR 120.0
+#define TAG_SCRUB_COMMIT_THRESHOLD 0.5
+
+static inline double tag_scrub_progress(double accumulated_delta,
+										double monitor_dim) {
+	if (monitor_dim <= 0.0)
+		return 0.0;
+	double p = accumulated_delta / monitor_dim;
+	if (p > 1.0)
+		p = 1.0;
+	if (p < -1.0)
+		p = -1.0;
+	return p;
+}
+
+static inline int tag_scrub_neighbor(int curtag, int dir, int ntags,
+									 uint32_t occupied_mask, bool have_client,
+									 bool wrap) {
+	if (curtag < 1 || curtag > ntags || (dir != 1 && dir != -1))
+		return 0;
+	int t = curtag;
+	for (int step = 0; step < ntags; step++) {
+		t += dir;
+		if (t < 1) {
+			if (!wrap)
+				return 0;
+			t = ntags;
+		} else if (t > ntags) {
+			if (!wrap)
+				return 0;
+			t = 1;
+		}
+		if (t == curtag)
+			return 0;
+		if (!have_client)
+			return t;
+		if (occupied_mask & (1u << (t - 1)))
+			return t;
+	}
+	return 0;
+}
+
+static inline bool tag_scrub_should_commit(double progress_magnitude,
+										   double velocity) {
+	double projected =
+		progress_magnitude + velocity * TAG_SCRUB_PROJECTION_FACTOR;
+	if (projected < 0.0)
+		projected = -projected;
+	return projected >= TAG_SCRUB_COMMIT_THRESHOLD;
+}
+
+#endif /* TAG_SCRUB_MATH_H */
