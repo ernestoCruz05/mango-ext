@@ -2,7 +2,7 @@
 #define TAG_SCRUB_MATH_H
 #include <stdbool.h>
 #include <stdint.h>
-#define TAG_SCRUB_PROJECTION_FACTOR 120.0
+#define TAG_SCRUB_PROJECTION_FACTOR 18.0
 
 static inline double tag_scrub_progress(double accumulated_delta,
 										double monitor_dim) {

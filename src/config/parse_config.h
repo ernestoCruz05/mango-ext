@@ -237,6 +237,7 @@ typedef struct {
 	int32_t drag_tile_small;
 	uint32_t swipe_min_threshold;
 	float gesture_commit_ratio;
+	int32_t gesture_swipe_distance;
 	float focused_opacity;
 	float unfocused_opacity;
 	float *scroller_proportion_preset;
@@ -1535,6 +1536,8 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->swipe_min_threshold = atoi(value);
 	} else if (strcmp(key, "gesture_commit_ratio") == 0) {
 		config->gesture_commit_ratio = atof(value);
+	} else if (strcmp(key, "gesture_swipe_distance") == 0) {
+		config->gesture_swipe_distance = atoi(value);
 	} else if (strcmp(key, "focused_opacity") == 0) {
 		config->focused_opacity = atof(value);
 	} else if (strcmp(key, "unfocused_opacity") == 0) {
@@ -3564,6 +3567,8 @@ void override_config(void) {
 	config.swipe_min_threshold = CLAMP_INT(config.swipe_min_threshold, 1, 1000);
 	config.gesture_commit_ratio =
 		CLAMP_FLOAT(config.gesture_commit_ratio, 0.0f, 1.0f);
+	config.gesture_swipe_distance =
+		CLAMP_INT(config.gesture_swipe_distance, 50, 4000);
 	config.mouse_natural_scrolling =
 		CLAMP_INT(config.mouse_natural_scrolling, 0, 1);
 	config.mouse_accel_profile = CLAMP_INT(config.mouse_accel_profile, 0, 2);
@@ -3720,6 +3725,7 @@ void set_value_default() {
 	config.enable_floating_snap = 0;
 	config.swipe_min_threshold = 1;
 	config.gesture_commit_ratio = 0.5f;
+	config.gesture_swipe_distance = 300;
 
 	config.idleinhibit_ignore_visible = 0;
 

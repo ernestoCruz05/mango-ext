@@ -145,7 +145,7 @@ static inline void tag_scrub_feed(Monitor *m, double dx, double dy,
 		return;
 	double delta = (m->scrub_axis == HORIZONTAL) ? dx : dy;
 	m->scrub_accum += delta;
-	double dim = (m->scrub_axis == HORIZONTAL) ? m->m.width : m->m.height;
+	double dim = (double)config.gesture_swipe_distance;
 	uint32_t dt = (m->scrub_last_time && time_msec > m->scrub_last_time)
 					  ? (time_msec - m->scrub_last_time)
 					  : 1;
