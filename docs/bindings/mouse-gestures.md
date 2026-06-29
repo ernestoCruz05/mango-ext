@@ -86,6 +86,27 @@ gesturebind=none,up,4,toggleoverview
 gesturebind=none,down,4,toggleoverview
 ```
 
+### Continuous (1:1) tag scrubbing
+tagscrub drags the adjacent tag in proportionally to a multi-finger swipe, rather than firing once on release. Past half a screen (or a quick flick) commits the switch; otherwise the tag snaps back.
+
+```ini
+# 4-finger horizontal: scrub between numeric-adjacent tags
+gesturebind=none,horizontal,4,tagscrub
+
+# Skip empty tags (land on the next occupied tag), like *_have_client dispatchers
+gesturebind=none,horizontal,4,tagscrub,have_client
+```
+
+- The direction field (`horizontal`/`vertical`) selects which finger axis drives the scrub. For best results match it to `tag_animation_direction`.
+
+### Commit threshold
+
+`gesture_commit_ratio` (0–1, default `0.5`) sets how far you must swipe to commit a `tagscrub`, e.g. `0.3` commits after 30% of a swipe.
+
+```ini
+gesture_commit_ratio=0.5
+```
+
 ---
 
 ## Switch Bindings
