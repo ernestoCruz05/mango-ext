@@ -212,26 +212,21 @@ static inline void tag_scrub_release(Monitor *m, bool cancelled) {
 		}
 		view_in_mon(&(Arg){.ui = inbit}, true, m, true);
 	} else {
+		uint32_t saved_prevtag = m->pertag->prevtag;
+		if (m->scrub_incoming_tag) {
+			m->pertag->prevtag = m->scrub_incoming_tag;
+			m->carousel_anim_dir = -(int8_t)m->scrub_dir;
+		}
 		Client *c;
 		uint32_t curbit = 1u << (m->pertag->curtag - 1);
-		uint32_t inbit =
-			m->scrub_incoming_tag ? (1u << (m->scrub_incoming_tag - 1)) : 0;
 		wl_list_for_each(c, &clients, link) {
-			if (c->mon != m || !ISTILED(c))
-				continue;
-			if (inbit && (c->tags & inbit) && !(c->isglobal || c->isunglobal)) {
-				struct wlr_box off = c->animainit_geom;
-				c->animation.tagining = false;
-				c->animation.tagouting = true;
-				c->animation.running = false;
-				c->pending = off;
-				resize(c, c->geom, 0);
-			} else if (c->tags & curbit) {
+			if (c->mon == m && ISTILED(c) && (c->tags & curbit)) {
 				c->animation.tagouting = false;
 				c->animation.running = true;
 			}
 		}
 		arrange(m, true, true);
+		m->pertag->prevtag = saved_prevtag;
 	}
 
 	m->scrub_active = false;
