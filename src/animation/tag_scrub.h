@@ -1,11 +1,5 @@
 #ifndef TAG_SCRUB_H
 #define TAG_SCRUB_H
-
-/* Pull in the pure decision math directly so this header is self-sufficient:
- * an include-sorter in the consumer (mango.c) may reorder the two includes
- * alphabetically (tag_scrub.h sorts before tag_scrub_math.h), which would
- * otherwise use these functions before they are declared. The guard in
- * tag_scrub_math.h makes the duplicate include in mango.c harmless. */
 #include "tag_scrub_math.h"
 
 static inline uint32_t tag_scrub_occupied_mask(Monitor *m) {
@@ -161,19 +155,47 @@ static inline void tag_scrub_feed(Monitor *m, double dx, double dy,
 	m->scrub_last_time = time_msec;
 
 	int dir = (m->scrub_accum > 0) ? +1 : (m->scrub_accum < 0 ? -1 : 0);
+	double signed_p = tag_scrub_progress(m->scrub_accum, dim);
+	double mag_p = signed_p < 0 ? -signed_p : signed_p;
+
+	if (!config.animations) {
+		m->scrub_dir = (int8_t)dir;
+		m->scrub_progress = mag_p;
+		return;
+	}
+
 	if (dir != 0 && dir != m->scrub_dir) {
 		if (m->scrub_incoming_tag || m->scrub_rubberband)
 			tag_scrub_unstage(m);
 		tag_scrub_stage(m, dir);
 	}
-
-	double signed_p = tag_scrub_progress(m->scrub_accum, dim);
-	tag_scrub_apply(m, signed_p < 0 ? -signed_p : signed_p);
+	tag_scrub_apply(m, mag_p);
 }
 
 static inline void tag_scrub_release(Monitor *m, bool cancelled) {
 	if (!m->scrub_active)
 		return;
+
+	if (!config.animations) {
+		double oriented_v = m->scrub_velocity * (double)m->scrub_dir;
+		if (!cancelled && m->scrub_dir != 0 &&
+			gesture_scrub_should_commit(m->scrub_progress, oriented_v,
+										config.gesture_commit_ratio)) {
+			uint32_t mask = tag_scrub_occupied_mask(m);
+			int target = tag_scrub_neighbor(
+				(int)m->pertag->curtag, m->scrub_dir, LENGTH(tags), mask,
+				m->scrub_have_client, config.tag_carousel);
+			if (target != 0)
+				view_in_mon(&(Arg){.ui = 1u << (target - 1)}, false, m, true);
+		}
+		m->scrub_active = false;
+		m->scrub_dir = 0;
+		m->scrub_progress = 0.0;
+		m->scrub_accum = 0.0;
+		m->scrub_velocity = 0.0;
+		return;
+	}
+
 	double oriented_v = m->scrub_velocity * (double)m->scrub_dir;
 	bool commit = !cancelled && !m->scrub_rubberband && m->scrub_incoming_tag &&
 				  gesture_scrub_should_commit(m->scrub_progress, oriented_v,
