@@ -176,7 +176,8 @@ static inline void tag_scrub_release(Monitor *m, bool cancelled) {
 		return;
 	double oriented_v = m->scrub_velocity * (double)m->scrub_dir;
 	bool commit = !cancelled && !m->scrub_rubberband && m->scrub_incoming_tag &&
-				  tag_scrub_should_commit(m->scrub_progress, oriented_v);
+				  gesture_scrub_should_commit(m->scrub_progress, oriented_v,
+											  config.gesture_commit_ratio);
 
 	if (commit) {
 		Client *c;

@@ -3,7 +3,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #define TAG_SCRUB_PROJECTION_FACTOR 120.0
-#define TAG_SCRUB_COMMIT_THRESHOLD 0.5
 
 static inline double tag_scrub_progress(double accumulated_delta,
 										double monitor_dim) {
@@ -44,13 +43,14 @@ static inline int tag_scrub_neighbor(int curtag, int dir, int ntags,
 	return 0;
 }
 
-static inline bool tag_scrub_should_commit(double progress_magnitude,
-										   double velocity) {
+static inline bool gesture_scrub_should_commit(double progress_magnitude,
+											   double velocity,
+											   double commit_ratio) {
 	double projected =
 		progress_magnitude + velocity * TAG_SCRUB_PROJECTION_FACTOR;
 	if (projected < 0.0)
 		projected = -projected;
-	return projected >= TAG_SCRUB_COMMIT_THRESHOLD;
+	return projected >= commit_ratio;
 }
 
 #endif /* TAG_SCRUB_MATH_H */
