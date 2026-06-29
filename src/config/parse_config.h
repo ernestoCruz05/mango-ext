@@ -3725,7 +3725,7 @@ void set_value_default() {
 	config.enable_floating_snap = 0;
 	config.swipe_min_threshold = 1;
 	config.gesture_commit_ratio = 0.5f;
-	config.gesture_swipe_distance = 300;
+	config.gesture_swipe_distance = 500;
 
 	config.idleinhibit_ignore_visible = 0;
 

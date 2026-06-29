@@ -144,6 +144,8 @@ static inline void tag_scrub_feed(Monitor *m, double dx, double dy,
 	if (!m->scrub_active)
 		return;
 	double delta = (m->scrub_axis == HORIZONTAL) ? dx : dy;
+	if (config.trackpad_natural_scrolling)
+		delta = -delta;
 	m->scrub_accum += delta;
 	double dim = (double)config.gesture_swipe_distance;
 	uint32_t dt = (m->scrub_last_time && time_msec > m->scrub_last_time)

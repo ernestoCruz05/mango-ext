@@ -101,12 +101,14 @@ gesturebind=none,horizontal,4,tagscrub,have_client
 
 ### Scrub feel
 
-`gesture_swipe_distance` (px, default `300`) is how much finger travel maps to a full tag slide. Lower = more sensitive (less travel to switch); higher = more deliberate.
+The scrub follows your `trackpad_natural_scrolling` setting.
+
+`gesture_swipe_distance` (px, default `500`) is how much finger travel maps to a full tag slide. Lower = more sensitive (less travel to switch); higher = more deliberate.
 
 `gesture_commit_ratio` (0–1, default `0.5`) sets how far through that distance you must swipe to commit a `tagscrub`, e.g. `0.3` commits after 30%. A fast flick can commit a bit below this via momentum.
 
 ```ini
-gesture_swipe_distance=300
+gesture_swipe_distance=500
 gesture_commit_ratio=0.5
 ```
 
