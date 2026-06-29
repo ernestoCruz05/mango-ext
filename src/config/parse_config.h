@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <strings.h>
 
 #ifndef SYSCONFDIR
 #define SYSCONFDIR "/etc"
@@ -158,6 +159,9 @@ typedef struct {
 	uint32_t fingers_count;
 	int32_t (*func)(const Arg *);
 	Arg arg;
+	bool continuous;
+	uint8_t axis;
+	bool have_client;
 } GestureBinding;
 
 typedef enum {
@@ -264,6 +268,7 @@ typedef struct {
 	int32_t drag_tile_to_tile;
 	int32_t drag_tile_small;
 	uint32_t swipe_min_threshold;
+	float gesture_commit_ratio;
 	float focused_opacity;
 	float unfocused_opacity;
 	float *scroller_proportion_preset;
@@ -1713,6 +1718,8 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->drag_tile_small = atoi(value);
 	} else if (strcmp(key, "swipe_min_threshold") == 0) {
 		config->swipe_min_threshold = atoi(value);
+	} else if (strcmp(key, "gesture_commit_ratio") == 0) {
+		config->gesture_commit_ratio = atof(value);
 	} else if (strcmp(key, "focused_opacity") == 0) {
 		config->focused_opacity = atof(value);
 	} else if (strcmp(key, "unfocused_opacity") == 0) {
@@ -3282,6 +3289,19 @@ bool parse_option(Config *config, char *key, char *value) {
 		binding->arg.v2 = NULL;
 		binding->arg.v3 = NULL;
 		binding->arg.tc = NULL;
+
+		if (strcmp(func_name, "tagscrub") == 0) {
+			binding->continuous = true;
+			binding->func = NULL;
+			if (strcasecmp(motion_str, "vertical") == 0)
+				binding->axis = VERTICAL;
+			else
+				binding->axis = HORIZONTAL;
+			binding->have_client = (strcmp(arg_value, "have_client") == 0);
+			config->gesture_bindings_count++;
+			return true;
+		}
+
 		binding->func =
 			parse_func_name(func_name, &binding->arg, arg_value, arg_value2,
 							arg_value3, arg_value4, arg_value5);
@@ -3978,6 +3998,8 @@ void override_config(void) {
 	config.middle_button_emulation =
 		CLAMP_INT(config.middle_button_emulation, 0, 1);
 	config.swipe_min_threshold = CLAMP_INT(config.swipe_min_threshold, 1, 1000);
+	config.gesture_commit_ratio =
+		CLAMP_FLOAT(config.gesture_commit_ratio, 0.0f, 1.0f);
 	config.mouse_natural_scrolling =
 		CLAMP_INT(config.mouse_natural_scrolling, 0, 1);
 	config.mouse_accel_profile = CLAMP_INT(config.mouse_accel_profile, 0, 2);
@@ -4156,6 +4178,7 @@ void set_value_default() {
 	config.drag_tile_small = 1;
 	config.enable_floating_snap = 0;
 	config.swipe_min_threshold = 1;
+	config.gesture_commit_ratio = 0.5f;
 
 	config.idleinhibit_ignore_visible = 0;
 

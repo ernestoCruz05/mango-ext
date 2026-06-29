@@ -669,6 +669,17 @@ struct Monitor {
 	float canvas_saved_zoom;
 	int8_t carousel_anim_dir;
 	bool iscleanuping;
+	bool scrub_active;
+	uint8_t scrub_axis;
+	int8_t scrub_dir;
+	bool scrub_have_client;
+	bool scrub_rubberband;
+	uint32_t scrub_incoming_tag;
+	double scrub_accum;
+	double scrub_progress;
+	double scrub_last_delta;
+	uint32_t scrub_last_time;
+	double scrub_velocity;
 };
 
 typedef struct {
@@ -1254,6 +1265,8 @@ static struct wl_event_source *sync_keymap;
 #include "animation/common.h"
 #include "animation/layer.h"
 #include "animation/tag.h"
+#include "animation/tag_scrub.h"
+#include "animation/tag_scrub_math.h"
 static void canvas_reposition(Monitor *m);
 static void canvas_pan_to_client(Monitor *m, Client *c);
 #include "dispatch/bind_define.h"
@@ -2421,7 +2434,15 @@ void swipe_begin(struct wl_listener *listener, void *data) {
 		}
 	}
 
-	// Forward swipe begin event to client
+	int ji;
+	for (ji = 0; ji < config.gesture_bindings_count; ji++) {
+		const GestureBinding *g = &config.gesture_bindings[ji];
+		if (g->continuous && g->fingers_count == event->fingers) {
+			if (tag_scrub_arm(selmon, g))
+				break;
+		}
+	}
+
 	wlr_pointer_gestures_v1_send_swipe_begin(pointer_gestures, seat,
 											 event->time_msec, event->fingers);
 }
@@ -2441,11 +2462,11 @@ void swipe_update(struct wl_listener *listener, void *data) {
 	}
 
 	swipe_fingers = event->fingers;
-	// Accumulate swipe distance
 	swipe_dx += event->dx;
 	swipe_dy += event->dy;
 
-	// Forward swipe update event to client
+	if (tag_scrub_active(selmon))
+		tag_scrub_feed(selmon, event->dx, event->dy, event->time_msec);
 	wlr_pointer_gestures_v1_send_swipe_update(
 		pointer_gestures, seat, event->time_msec, event->dx, event->dy);
 }
@@ -2458,10 +2479,13 @@ void swipe_end(struct wl_listener *listener, void *data) {
 		return;
 	}
 
-	ongesture(event);
+	if (tag_scrub_active(selmon)) {
+		tag_scrub_release(selmon, event->cancelled);
+	} else {
+		ongesture(event);
+	}
 	swipe_dx = 0;
 	swipe_dy = 0;
-	// Forward swipe end event to client
 	wlr_pointer_gestures_v1_send_swipe_end(pointer_gestures, seat,
 										   event->time_msec, event->cancelled);
 }
