@@ -212,21 +212,30 @@ static inline void tag_scrub_release(Monitor *m, bool cancelled) {
 		}
 		view_in_mon(&(Arg){.ui = inbit}, true, m, true);
 	} else {
-		uint32_t saved_prevtag = m->pertag->prevtag;
-		if (m->scrub_incoming_tag) {
-			m->pertag->prevtag = m->scrub_incoming_tag;
-			m->carousel_anim_dir = -(int8_t)m->scrub_dir;
-		}
-		Client *c;
 		uint32_t curbit = 1u << (m->pertag->curtag - 1);
+		uint32_t inbit =
+			m->scrub_incoming_tag ? (1u << (m->scrub_incoming_tag - 1)) : 0;
+		uint32_t now = get_now_in_ms();
+		Client *c;
 		wl_list_for_each(c, &clients, link) {
-			if (c->mon == m && ISTILED(c) && (c->tags & curbit)) {
-				c->animation.tagouting = false;
-				c->animation.running = true;
-			}
+			if (c->mon != m || !ISTILED(c))
+				continue;
+			bool is_incoming =
+				inbit && (c->tags & inbit) && !(c->isglobal || c->isunglobal);
+			if (!is_incoming && !(c->tags & curbit))
+				continue;
+
+			c->animation.initial = c->animation.current;
+			c->current = is_incoming ? c->animainit_geom : c->geom;
+			c->animation.tagining = false;
+			c->animation.tagouting = is_incoming;
+			c->animation.action = TAG;
+			c->animation.duration = config.animation_duration_tag;
+			c->animation.time_started = now;
+			c->animation.running = true;
+			c->need_output_flush = true;
 		}
-		arrange(m, true, true);
-		m->pertag->prevtag = saved_prevtag;
+		request_fresh_all_monitors();
 	}
 
 	m->scrub_active = false;
