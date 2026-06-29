@@ -214,13 +214,23 @@ static inline void tag_scrub_release(Monitor *m, bool cancelled) {
 	} else {
 		Client *c;
 		uint32_t curbit = 1u << (m->pertag->curtag - 1);
+		uint32_t inbit =
+			m->scrub_incoming_tag ? (1u << (m->scrub_incoming_tag - 1)) : 0;
 		wl_list_for_each(c, &clients, link) {
-			if (c->mon == m && ISTILED(c) && (c->tags & curbit)) {
+			if (c->mon != m || !ISTILED(c))
+				continue;
+			if (inbit && (c->tags & inbit) && !(c->isglobal || c->isunglobal)) {
+				struct wlr_box off = c->animainit_geom;
+				c->animation.tagining = false;
+				c->animation.tagouting = true;
+				c->animation.running = false;
+				c->pending = off;
+				resize(c, c->geom, 0);
+			} else if (c->tags & curbit) {
 				c->animation.tagouting = false;
 				c->animation.running = true;
 			}
 		}
-		tag_scrub_unstage(m);
 		arrange(m, true, true);
 	}
 
