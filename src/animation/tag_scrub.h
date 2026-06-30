@@ -193,6 +193,18 @@ static inline void tag_scrub_feed(Monitor *m, double dx, double dy,
 	double signed_p = tag_scrub_progress(m->scrub_accum, dim);
 	double mag_p = signed_p < 0 ? -signed_p : signed_p;
 
+	if (!config.animations) {
+		m->scrub_dir = (int8_t)dir;
+		uint32_t mask = tag_scrub_occupied_mask(m);
+		int target =
+			tag_scrub_neighbor((int)m->pertag->curtag, dir, LENGTH(tags), mask,
+							   m->scrub_have_client, config.tag_carousel);
+		m->scrub_rubberband = (dir != 0 && target == 0);
+		m->scrub_incoming_tag = 0;
+		tag_scrub_apply(m, mag_p);
+		return;
+	}
+
 	if (dir != 0 && dir != m->scrub_dir) {
 		if (m->scrub_incoming_tag || m->scrub_rubberband)
 			tag_scrub_unstage(m);
@@ -206,15 +218,31 @@ static inline void tag_scrub_release(Monitor *m, bool cancelled) {
 		return;
 
 	double oriented_v = m->scrub_velocity * (double)m->scrub_dir;
-	bool commit = !cancelled && !m->scrub_rubberband && m->scrub_incoming_tag &&
-				  gesture_scrub_should_commit(m->scrub_progress, oriented_v,
-											  config.gesture_commit_ratio);
 
-	if (commit) {
-		uint32_t inbit = 1u << (m->scrub_incoming_tag - 1);
-		if (config.animations) {
-			Client *c;
+	if (!config.animations) {
+		bool commit = !cancelled && m->scrub_dir != 0 && !m->scrub_rubberband &&
+					  gesture_scrub_should_commit(m->scrub_progress, oriented_v,
+												  config.gesture_commit_ratio);
+		int target = 0;
+		if (commit) {
+			uint32_t mask = tag_scrub_occupied_mask(m);
+			target = tag_scrub_neighbor(
+				(int)m->pertag->curtag, m->scrub_dir, LENGTH(tags), mask,
+				m->scrub_have_client, config.tag_carousel);
+		}
+		if (target != 0)
+			view_in_mon(&(Arg){.ui = 1u << (target - 1)}, false, m, true);
+		else
+			arrange(m, true, true);
+	} else {
+		bool commit = !cancelled && !m->scrub_rubberband &&
+					  m->scrub_incoming_tag &&
+					  gesture_scrub_should_commit(m->scrub_progress, oriented_v,
+												  config.gesture_commit_ratio);
+		if (commit) {
+			uint32_t inbit = 1u << (m->scrub_incoming_tag - 1);
 			uint32_t curbit = 1u << (m->pertag->curtag - 1);
+			Client *c;
 			wl_list_for_each(c, &clients, link) {
 				if (c->mon == m && ISTILED(c) &&
 					((c->tags & inbit) || (c->tags & curbit)))
@@ -222,39 +250,35 @@ static inline void tag_scrub_release(Monitor *m, bool cancelled) {
 			}
 			view_in_mon(&(Arg){.ui = inbit}, true, m, true);
 		} else {
-			view_in_mon(&(Arg){.ui = inbit}, false, m, true);
-		}
-	} else if (config.animations) {
-		uint32_t curbit = 1u << (m->pertag->curtag - 1);
-		uint32_t inbit =
-			m->scrub_incoming_tag ? (1u << (m->scrub_incoming_tag - 1)) : 0;
-		uint32_t now = get_now_in_ms();
-		Client *c;
-		wl_list_for_each(c, &clients, link) {
-			if (c->mon != m || !ISTILED(c))
-				continue;
-			bool is_incoming =
-				inbit && (c->tags & inbit) && !(c->isglobal || c->isunglobal);
-			if (!is_incoming && !(c->tags & curbit))
-				continue;
+			uint32_t curbit = 1u << (m->pertag->curtag - 1);
+			uint32_t inbit =
+				m->scrub_incoming_tag ? (1u << (m->scrub_incoming_tag - 1)) : 0;
+			uint32_t now = get_now_in_ms();
+			Client *c;
+			wl_list_for_each(c, &clients, link) {
+				if (c->mon != m || !ISTILED(c))
+					continue;
+				bool is_incoming = inbit && (c->tags & inbit) &&
+								   !(c->isglobal || c->isunglobal);
+				if (!is_incoming && !(c->tags & curbit))
+					continue;
 
-			c->animation.initial = c->animation.current;
-			c->current = is_incoming ? c->animainit_geom : c->geom;
-			c->animation.tagining = false;
-			c->animation.tagouting = is_incoming;
-			c->animation.action = TAG;
-			c->animation.duration = config.animation_duration_tag;
-			c->animation.time_started = now;
-			c->animation.running = true;
-			c->need_output_flush = true;
+				c->animation.initial = c->animation.current;
+				c->current = is_incoming ? c->animainit_geom : c->geom;
+				c->animation.tagining = false;
+				c->animation.tagouting = is_incoming;
+				c->animation.action = TAG;
+				c->animation.duration = config.animation_duration_tag;
+				c->animation.time_started = now;
+				c->animation.running = true;
+				c->need_output_flush = true;
+			}
+			request_fresh_all_monitors();
 		}
-		request_fresh_all_monitors();
-	} else {
-		tag_scrub_unstage(m);
-		arrange(m, true, true);
 	}
 
 	m->scrub_active = false;
+	m->scrub_axis_locked = false;
 	m->scrub_dir = 0;
 	m->scrub_progress = 0.0;
 	m->scrub_accum = 0.0;
