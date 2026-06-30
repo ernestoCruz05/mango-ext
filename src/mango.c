@@ -591,6 +591,7 @@ struct Monitor {
 	double scrub_last_delta;
 	uint32_t scrub_last_time;
 	double scrub_velocity;
+	bool scrub_axis_locked;
 };
 
 typedef struct {
@@ -2212,9 +2213,10 @@ void swipe_update(struct wl_listener *listener, void *data) {
 void swipe_end(struct wl_listener *listener, void *data) {
 	struct wlr_pointer_swipe_end_event *event = data;
 
-	if (tag_scrub_active(selmon)) {
+	if (tag_scrub_engaged(selmon)) {
 		tag_scrub_release(selmon, event->cancelled);
 	} else {
+		tag_scrub_abort(selmon);
 		ongesture(event);
 	}
 	swipe_dx = 0;

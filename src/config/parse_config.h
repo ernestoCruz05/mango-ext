@@ -238,6 +238,7 @@ typedef struct {
 	uint32_t swipe_min_threshold;
 	float gesture_commit_ratio;
 	int32_t gesture_swipe_distance;
+	int32_t gesture_axis_lock;
 	float focused_opacity;
 	float unfocused_opacity;
 	float *scroller_proportion_preset;
@@ -1538,6 +1539,8 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->gesture_commit_ratio = atof(value);
 	} else if (strcmp(key, "gesture_swipe_distance") == 0) {
 		config->gesture_swipe_distance = atoi(value);
+	} else if (strcmp(key, "gesture_axis_lock") == 0) {
+		config->gesture_axis_lock = atoi(value);
 	} else if (strcmp(key, "focused_opacity") == 0) {
 		config->focused_opacity = atof(value);
 	} else if (strcmp(key, "unfocused_opacity") == 0) {
@@ -3569,6 +3572,7 @@ void override_config(void) {
 		CLAMP_FLOAT(config.gesture_commit_ratio, 0.0f, 1.0f);
 	config.gesture_swipe_distance =
 		CLAMP_INT(config.gesture_swipe_distance, 50, 4000);
+	config.gesture_axis_lock = CLAMP_INT(config.gesture_axis_lock, 0, 1000);
 	config.mouse_natural_scrolling =
 		CLAMP_INT(config.mouse_natural_scrolling, 0, 1);
 	config.mouse_accel_profile = CLAMP_INT(config.mouse_accel_profile, 0, 2);
@@ -3726,6 +3730,7 @@ void set_value_default() {
 	config.swipe_min_threshold = 1;
 	config.gesture_commit_ratio = 0.5f;
 	config.gesture_swipe_distance = 500;
+	config.gesture_axis_lock = 16;
 
 	config.idleinhibit_ignore_visible = 0;
 

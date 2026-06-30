@@ -122,6 +122,23 @@ static inline void tag_scrub_apply(Monitor *m, double progress) {
 
 static inline bool tag_scrub_active(Monitor *m) { return m && m->scrub_active; }
 
+static inline bool tag_scrub_engaged(Monitor *m) {
+	return m && m->scrub_active && m->scrub_axis_locked;
+}
+
+static inline void tag_scrub_abort(Monitor *m) {
+	if (!m)
+		return;
+	m->scrub_active = false;
+	m->scrub_axis_locked = false;
+	m->scrub_dir = 0;
+	m->scrub_progress = 0.0;
+	m->scrub_accum = 0.0;
+	m->scrub_velocity = 0.0;
+	m->scrub_incoming_tag = 0;
+	m->scrub_rubberband = false;
+}
+
 static inline bool tag_scrub_arm(Monitor *m, const GestureBinding *g) {
 	if (!m || m->isoverview || m->pertag->curtag == 0)
 		return false;
@@ -136,6 +153,7 @@ static inline bool tag_scrub_arm(Monitor *m, const GestureBinding *g) {
 	m->scrub_velocity = 0.0;
 	m->scrub_last_delta = 0.0;
 	m->scrub_last_time = 0;
+	m->scrub_axis_locked = false;
 	return true;
 }
 
@@ -143,6 +161,21 @@ static inline void tag_scrub_feed(Monitor *m, double dx, double dy,
 								  uint32_t time_msec) {
 	if (!m->scrub_active)
 		return;
+
+	if (!m->scrub_axis_locked) {
+		double along = (m->scrub_axis == HORIZONTAL) ? swipe_dx : swipe_dy;
+		double perp = (m->scrub_axis == HORIZONTAL) ? swipe_dy : swipe_dx;
+		double a = along < 0 ? -along : along;
+		double p = perp < 0 ? -perp : perp;
+		if (a + p < (double)config.gesture_axis_lock)
+			return;
+		if (p > a) {
+			m->scrub_active = false;
+			return;
+		}
+		m->scrub_axis_locked = true;
+	}
+
 	double delta = (m->scrub_axis == HORIZONTAL) ? dx : dy;
 	if (config.trackpad_natural_scrolling)
 		delta = -delta;
@@ -160,12 +193,6 @@ static inline void tag_scrub_feed(Monitor *m, double dx, double dy,
 	double signed_p = tag_scrub_progress(m->scrub_accum, dim);
 	double mag_p = signed_p < 0 ? -signed_p : signed_p;
 
-	if (!config.animations) {
-		m->scrub_dir = (int8_t)dir;
-		m->scrub_progress = mag_p;
-		return;
-	}
-
 	if (dir != 0 && dir != m->scrub_dir) {
 		if (m->scrub_incoming_tag || m->scrub_rubberband)
 			tag_scrub_unstage(m);
@@ -178,42 +205,26 @@ static inline void tag_scrub_release(Monitor *m, bool cancelled) {
 	if (!m->scrub_active)
 		return;
 
-	if (!config.animations) {
-		double oriented_v = m->scrub_velocity * (double)m->scrub_dir;
-		if (!cancelled && m->scrub_dir != 0 &&
-			gesture_scrub_should_commit(m->scrub_progress, oriented_v,
-										config.gesture_commit_ratio)) {
-			uint32_t mask = tag_scrub_occupied_mask(m);
-			int target = tag_scrub_neighbor(
-				(int)m->pertag->curtag, m->scrub_dir, LENGTH(tags), mask,
-				m->scrub_have_client, config.tag_carousel);
-			if (target != 0)
-				view_in_mon(&(Arg){.ui = 1u << (target - 1)}, false, m, true);
-		}
-		m->scrub_active = false;
-		m->scrub_dir = 0;
-		m->scrub_progress = 0.0;
-		m->scrub_accum = 0.0;
-		m->scrub_velocity = 0.0;
-		return;
-	}
-
 	double oriented_v = m->scrub_velocity * (double)m->scrub_dir;
 	bool commit = !cancelled && !m->scrub_rubberband && m->scrub_incoming_tag &&
 				  gesture_scrub_should_commit(m->scrub_progress, oriented_v,
 											  config.gesture_commit_ratio);
 
 	if (commit) {
-		Client *c;
 		uint32_t inbit = 1u << (m->scrub_incoming_tag - 1);
-		uint32_t curbit = 1u << (m->pertag->curtag - 1);
-		wl_list_for_each(c, &clients, link) {
-			if (c->mon == m && ISTILED(c) &&
-				((c->tags & inbit) || (c->tags & curbit)))
-				c->animation.running = true;
+		if (config.animations) {
+			Client *c;
+			uint32_t curbit = 1u << (m->pertag->curtag - 1);
+			wl_list_for_each(c, &clients, link) {
+				if (c->mon == m && ISTILED(c) &&
+					((c->tags & inbit) || (c->tags & curbit)))
+					c->animation.running = true;
+			}
+			view_in_mon(&(Arg){.ui = inbit}, true, m, true);
+		} else {
+			view_in_mon(&(Arg){.ui = inbit}, false, m, true);
 		}
-		view_in_mon(&(Arg){.ui = inbit}, true, m, true);
-	} else {
+	} else if (config.animations) {
 		uint32_t curbit = 1u << (m->pertag->curtag - 1);
 		uint32_t inbit =
 			m->scrub_incoming_tag ? (1u << (m->scrub_incoming_tag - 1)) : 0;
@@ -238,6 +249,9 @@ static inline void tag_scrub_release(Monitor *m, bool cancelled) {
 			c->need_output_flush = true;
 		}
 		request_fresh_all_monitors();
+	} else {
+		tag_scrub_unstage(m);
+		arrange(m, true, true);
 	}
 
 	m->scrub_active = false;
