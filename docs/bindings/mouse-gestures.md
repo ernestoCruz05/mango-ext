@@ -107,6 +107,8 @@ The scrub follows your `trackpad_natural_scrolling` setting.
 
 `gesture_commit_ratio` (0–1, default `0.5`) sets how far through that distance you must swipe to commit a `tagscrub`, e.g. `0.3` commits after 30%. A fast flick can commit a bit below this via momentum.
 
+`gesture_axis_lock` (px, default `16`) is how far the swipe must travel before the scrub decides whether it's along its axis. Raise it if imprecise swipes get misread.
+
 ```ini
 gesture_swipe_distance=500
 gesture_commit_ratio=0.5
