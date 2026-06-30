@@ -21,6 +21,8 @@ static inline int tag_scrub_neighbor(int curtag, int dir, int ntags,
 									 bool wrap) {
 	if (curtag < 1 || curtag > ntags || (dir != 1 && dir != -1))
 		return 0;
+	bool only_current_occupied = (occupied_mask & ~(1u << (curtag - 1))) == 0;
+	bool skip_empty = have_client && !only_current_occupied;
 	int t = curtag;
 	for (int step = 0; step < ntags; step++) {
 		t += dir;
@@ -35,7 +37,7 @@ static inline int tag_scrub_neighbor(int curtag, int dir, int ntags,
 		}
 		if (t == curtag)
 			return 0;
-		if (!have_client)
+		if (!skip_empty)
 			return t;
 		if (occupied_mask & (1u << (t - 1)))
 			return t;
