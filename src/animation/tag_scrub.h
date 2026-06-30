@@ -50,6 +50,20 @@ static inline void tag_scrub_stage(Monitor *m, int dir) {
 	m->scrub_rubberband = false;
 	m->scrub_incoming_tag = (uint32_t)target;
 
+	/* Mango lays out tags lazily: a tag you moved a window off of
+	 * keeps stale window geometry until it's viewed. This is very annoying
+	 * Here i try to predict the arrangement of the tag just so the tags don't
+	 * appear miss-aligned in the scrub.
+	 * */
+	{
+		uint32_t saved_curtag = m->pertag->curtag;
+		m->pertag->curtag = (uint32_t)target;
+		pre_caculate_before_arrange(m, false, false, true);
+		m->pertag->ltidxs[target]->arrange(m);
+		m->pertag->curtag = saved_curtag;
+		pre_caculate_before_arrange(m, false, false, true);
+	}
+
 	Client *c;
 	uint32_t inbit = 1u << (target - 1);
 	wl_list_for_each(c, &clients, link) {
