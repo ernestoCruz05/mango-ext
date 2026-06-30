@@ -57,10 +57,13 @@ static inline void tag_scrub_stage(Monitor *m, int dir) {
 	 * */
 	{
 		uint32_t saved_curtag = m->pertag->curtag;
+		uint32_t saved_tagset = m->tagset[m->seltags];
 		m->pertag->curtag = (uint32_t)target;
+		m->tagset[m->seltags] = (1u << (target - 1));
 		pre_caculate_before_arrange(m, false, false, true);
 		m->pertag->ltidxs[target]->arrange(m);
 		m->pertag->curtag = saved_curtag;
+		m->tagset[m->seltags] = saved_tagset;
 		pre_caculate_before_arrange(m, false, false, true);
 	}
 
