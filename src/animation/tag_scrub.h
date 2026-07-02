@@ -93,8 +93,7 @@ static inline void tag_scrub_apply(Monitor *m, double progress) {
 		progress = 1.0;
 	m->scrub_progress = progress;
 
-	double eased = find_animation_curve_at(progress, TAG);
-	double eff = m->scrub_rubberband ? eased * 0.2 : eased;
+	double eff = m->scrub_rubberband ? progress * 0.2 : progress;
 	Client *c;
 	uint32_t inbit =
 		m->scrub_incoming_tag ? (1u << (m->scrub_incoming_tag - 1)) : 0;
@@ -256,14 +255,25 @@ static inline void tag_scrub_release(Monitor *m, bool cancelled) {
 	} else {
 		if (commit) {
 			uint32_t inbit = 1u << (m->scrub_incoming_tag - 1);
-			uint32_t curbit = 1u << (m->pertag->curtag - 1);
+			view_in_mon(&(Arg){.ui = inbit}, true, m, true);
+
+			// Continue the tag-in animation from the exact gesture position.
+			uint32_t now_ms = get_now_in_ms();
 			Client *c;
 			wl_list_for_each(c, &clients, link) {
-				if (c->mon == m && ISTILED(c) &&
-					((c->tags & inbit) || (c->tags & curbit)))
-					c->animation.running = true;
+				if (c->mon != m || !ISTILED(c) ||
+					(c->isglobal || c->isunglobal))
+					continue;
+				if (!(c->tags & inbit) || !c->animation.running)
+					continue;
+				uint32_t dur = c->animation.duration
+								   ? c->animation.duration
+								   : config.animation_duration_tag;
+				double p = m->scrub_progress > 1.0 ? 1.0 : m->scrub_progress;
+				double t0 = find_animation_curve_progress_for_y(p, TAG);
+				c->animation.time_started =
+					now_ms - (uint32_t)(t0 * (double)dur);
 			}
-			view_in_mon(&(Arg){.ui = inbit}, true, m, true);
 		} else {
 			uint32_t curbit = 1u << (m->pertag->curtag - 1);
 			uint32_t inbit =

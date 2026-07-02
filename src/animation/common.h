@@ -112,6 +112,46 @@ double find_animation_curve_at(double t, int32_t type) {
 	return baked_points[up].y;
 }
 
+double find_animation_curve_progress_for_y(double y, int32_t type) {
+	if (y <= 0.0)
+		return 0.0;
+	if (y >= 1.0)
+		return 1.0;
+
+	int32_t down = 0;
+	int32_t up = BAKED_POINTS_COUNT - 1;
+	int32_t middle = (up + down) / 2;
+
+	struct dvec2 *baked_points;
+	if (type == MOVE) {
+		baked_points = baked_points_move;
+	} else if (type == OPEN) {
+		baked_points = baked_points_open;
+	} else if (type == TAG) {
+		baked_points = baked_points_tag;
+	} else if (type == CLOSE) {
+		baked_points = baked_points_close;
+	} else if (type == FOCUS) {
+		baked_points = baked_points_focus;
+	} else if (type == OPAFADEIN) {
+		baked_points = baked_points_opafadein;
+	} else if (type == OPAFADEOUT) {
+		baked_points = baked_points_opafadeout;
+	} else {
+		baked_points = baked_points_move;
+	}
+
+	while (up - down != 1) {
+		if (baked_points[middle].y <= y) {
+			down = middle;
+		} else {
+			up = middle;
+		}
+		middle = (up + down) / 2;
+	}
+	return baked_points[up].x;
+}
+
 static bool scene_node_snapshot(struct wlr_scene_node *node, int32_t lx,
 								int32_t ly,
 								struct wlr_scene_tree *snapshot_tree) {
