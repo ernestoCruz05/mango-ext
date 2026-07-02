@@ -24,6 +24,7 @@ static inline void tag_scrub_unstage(Monitor *m) {
 		if (c->mon != m || !(c->tags & inbit))
 			continue;
 		c->animation.tagining = false;
+		client_fx_settle(c);
 		c->animation.running = false;
 		c->is_clip_to_hide = false;
 		wlr_scene_node_set_enabled(&c->scene->node, false);
@@ -77,6 +78,7 @@ static inline void tag_scrub_stage(Monitor *m, int dir) {
 		wlr_scene_node_set_enabled(&c->scene->node, true);
 		c->animation.tagining = true;
 		c->animation.tagouting = false;
+		client_fx_settle(c);
 		c->animation.running = false;
 		c->animation.current = c->geom;
 		set_tagin_animation(m, c);
@@ -113,6 +115,7 @@ static inline void tag_scrub_apply(Monitor *m, double progress) {
 			client_apply_clip(c, 1.0);
 			c->is_clip_to_hide = false;
 			wlr_scene_node_set_enabled(&c->scene->node, true);
+			client_fx_settle(c);
 			c->animation.running = false;
 			c->need_output_flush = false;
 		} else if (c->tags & curbit) {
@@ -130,6 +133,7 @@ static inline void tag_scrub_apply(Monitor *m, double progress) {
 			c->animation.current = g;
 			wlr_scene_node_set_position(&c->scene->node, g.x, g.y);
 			client_apply_clip(c, 1.0);
+			client_fx_settle(c);
 			c->animation.running = false;
 			c->need_output_flush = false;
 		}

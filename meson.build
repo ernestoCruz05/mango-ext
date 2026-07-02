@@ -39,6 +39,8 @@ libscenefx_dep = dependency('scenefx-0.4',version: '>=0.4.1')
 pixman_dep = dependency('pixman-1')
 cjson_dep = dependency('libcjson')
 pangocairo_dep = dependency('pangocairo')
+egl_dep = dependency('egl')
+glesv2_dep = dependency('glesv2')
 
 # version info
 git = find_program('git', required : false)
@@ -97,6 +99,7 @@ executable('mango-ext',
   'src/mango.c',
   'src/common/util.c',
   'src/draw/text-node.c',
+  'src/draw/effect_pass.c',
   'src/ext-protocol/wlr_ext_workspace_v1.c',
   wayland_sources,
   dependencies : [
@@ -114,6 +117,8 @@ executable('mango-ext',
     pixman_dep,
     cjson_dep,
     pangocairo_dep,
+    egl_dep,
+    glesv2_dep,
   ],
   install : true,
   install_rpath : get_option('install_rpath'),
