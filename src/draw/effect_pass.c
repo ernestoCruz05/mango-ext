@@ -5,7 +5,7 @@
 #include <drm_fourcc.h>
 #include <errno.h>
 #include <limits.h>
-#include <render/fx_renderer/fx_renderer.h>
+#include <scenefx/render/fx_renderer/fx_renderer.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +15,11 @@
 #include <wlr/render/wlr_texture.h>
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/util/log.h>
+
+bool wlr_texture_is_fx(struct wlr_texture *texture);
+bool wlr_renderer_is_fx(struct wlr_renderer *renderer);
+
+static struct wlr_buffer *effect_alloc_render_buffer(int w, int h);
 
 static struct {
 	bool ready;
@@ -31,12 +36,30 @@ bool effect_pass_init(struct wlr_renderer *renderer,
 						   "shaders disabled");
 		return false;
 	}
-	struct wlr_egl *egl = fx_get_renderer(renderer)->egl;
 	state.renderer = renderer;
 	state.alloc = alloc;
-	state.egl_display = wlr_egl_get_display(egl);
-	state.egl_context = wlr_egl_get_context(egl);
+	state.egl_display = EGL_NO_DISPLAY;
+	state.egl_context = EGL_NO_CONTEXT;
 	state.ready = true;
+
+	struct wlr_buffer *probe = effect_alloc_render_buffer(1, 1);
+	if (probe) {
+		struct wlr_render_pass *pass =
+			wlr_renderer_begin_buffer_pass(renderer, probe, NULL);
+		if (pass) {
+			state.egl_display = eglGetCurrentDisplay();
+			state.egl_context = eglGetCurrentContext();
+			wlr_render_pass_submit(pass);
+		}
+		wlr_buffer_drop(probe);
+	}
+
+	if (state.egl_display == EGL_NO_DISPLAY) {
+		wlr_log(WLR_ERROR,
+				"effect_pass: could not acquire EGL context, shaders disabled");
+		state.ready = false;
+		return false;
+	}
 	return true;
 }
 
