@@ -9,6 +9,11 @@ void set_rect_size(struct wlr_scene_rect *rect, int32_t width, int32_t height) {
 	wlr_scene_rect_set_size(rect, GEZERO(width), GEZERO(height));
 }
 
+static void client_surface_set_enabled(Client *c, bool enabled) {
+	if (!c->fx.active && c->scene_surface)
+		wlr_scene_node_set_enabled(&c->scene_surface->node, enabled);
+}
+
 static float get_client_effective_zoom(Client *c);
 
 enum corner_location set_client_corner_location(Client *c) {
@@ -265,7 +270,8 @@ static void scene_buffer_apply_canvas_clip(struct wlr_scene_buffer *buffer,
 	int32_t buf_screen_w = (int32_t)roundf(src_w * zoom);
 	int32_t buf_screen_h = (int32_t)roundf(src_h * zoom);
 
-	struct wlr_box buf_box = {buf_screen_x, buf_screen_y, buf_screen_w, buf_screen_h};
+	struct wlr_box buf_box = {buf_screen_x, buf_screen_y, buf_screen_w,
+							  buf_screen_h};
 	struct wlr_box intersection;
 	if (!wlr_box_intersection(&intersection, &buf_box, &cd->mon_bounds)) {
 		wlr_scene_buffer_set_source_box(buffer, NULL);
@@ -276,8 +282,7 @@ static void scene_buffer_apply_canvas_clip(struct wlr_scene_buffer *buffer,
 	int32_t crop_left = intersection.x - buf_screen_x;
 	int32_t crop_top = intersection.y - buf_screen_y;
 
-	if (crop_left == 0 && crop_top == 0 &&
-		intersection.width == buf_screen_w &&
+	if (crop_left == 0 && crop_top == 0 && intersection.width == buf_screen_w &&
 		intersection.height == buf_screen_h) {
 		wlr_scene_buffer_set_source_box(buffer, NULL);
 	} else {
@@ -296,13 +301,11 @@ static void scene_buffer_apply_canvas_clip(struct wlr_scene_buffer *buffer,
 	int32_t node_x = crop_left;
 	int32_t node_y = crop_top;
 	wlr_scene_node_set_position(&buffer->node, node_x, node_y);
+}
 
-	}
-
-static void find_buffer_bounds(struct wlr_scene_node *node,
-			       int32_t acc_x, int32_t acc_y,
-			       int32_t *min_x, int32_t *min_y,
-			       int32_t *max_x, int32_t *max_y) {
+static void find_buffer_bounds(struct wlr_scene_node *node, int32_t acc_x,
+							   int32_t acc_y, int32_t *min_x, int32_t *min_y,
+							   int32_t *max_x, int32_t *max_y) {
 	acc_x += node->x;
 	acc_y += node->y;
 	if (node->type == WLR_SCENE_NODE_BUFFER) {
@@ -317,22 +320,26 @@ static void find_buffer_bounds(struct wlr_scene_node *node,
 			h = buf->dst_height;
 		}
 		if (w > 0 && h > 0) {
-			if (acc_x < *min_x) *min_x = acc_x;
-			if (acc_y < *min_y) *min_y = acc_y;
-			if (acc_x + w > *max_x) *max_x = acc_x + w;
-			if (acc_y + h > *max_y) *max_y = acc_y + h;
+			if (acc_x < *min_x)
+				*min_x = acc_x;
+			if (acc_y < *min_y)
+				*min_y = acc_y;
+			if (acc_x + w > *max_x)
+				*max_x = acc_x + w;
+			if (acc_y + h > *max_y)
+				*max_y = acc_y + h;
 		}
 	}
 	if (node->type == WLR_SCENE_NODE_TREE) {
 		struct wlr_scene_tree *tree = wlr_scene_tree_from_node(node);
 		struct wlr_scene_node *child;
 		wl_list_for_each(child, &tree->children, link)
-			find_buffer_bounds(child, acc_x, acc_y,
-					   min_x, min_y, max_x, max_y);
+			find_buffer_bounds(child, acc_x, acc_y, min_x, min_y, max_x, max_y);
 	}
 }
 
-static void apply_canvas_clip_and_zoom(Client *c, float zoom, enum corner_location corners) {
+static void apply_canvas_clip_and_zoom(Client *c, float zoom,
+									   enum corner_location corners) {
 	struct wlr_box win_box = {
 		.x = c->animation.current.x,
 		.y = c->animation.current.y,
@@ -341,10 +348,10 @@ static void apply_canvas_clip_and_zoom(Client *c, float zoom, enum corner_locati
 	};
 	struct wlr_box dummy;
 	if (!wlr_box_intersection(&dummy, &win_box, &c->mon->m)) {
-		wlr_scene_node_set_enabled(&c->scene_surface->node, false);
+		client_surface_set_enabled(c, false);
 		return;
 	}
-	wlr_scene_node_set_enabled(&c->scene_surface->node, true);
+	client_surface_set_enabled(c, true);
 
 	if (zoom == 1.0f) {
 		int32_t bw = (int32_t)c->bw;
@@ -363,10 +370,10 @@ static void apply_canvas_clip_and_zoom(Client *c, float zoom, enum corner_locati
 		};
 		struct wlr_box visible;
 		if (!wlr_box_intersection(&visible, &content_screen, &c->mon->m)) {
-			wlr_scene_node_set_enabled(&c->scene_surface->node, false);
+			client_surface_set_enabled(c, false);
 			return;
 		}
-		wlr_scene_node_set_enabled(&c->scene_surface->node, true);
+		client_surface_set_enabled(c, true);
 
 		struct wlr_box clip = {
 			.x = visible.x - (c->animation.current.x + bw) + geom.x,
@@ -378,16 +385,16 @@ static void apply_canvas_clip_and_zoom(Client *c, float zoom, enum corner_locati
 		return;
 	}
 
-	struct canvas_clip_data cd = {
-		.zoom = zoom,
-		.mon_bounds = c->mon->m,
-		.tree_x = c->animation.current.x,
-		.tree_y = c->animation.current.y,
-		.bw = (int32_t)roundf(c->bw * zoom),
-		.corners = corners,
-		.root_node = &c->scene_surface->node};
+	struct canvas_clip_data cd = {.zoom = zoom,
+								  .mon_bounds = c->mon->m,
+								  .tree_x = c->animation.current.x,
+								  .tree_y = c->animation.current.y,
+								  .bw = (int32_t)roundf(c->bw * zoom),
+								  .corners = corners,
+								  .root_node = &c->scene_surface->node};
 
-	wlr_scene_node_for_each_buffer(&c->scene_surface->node, scene_buffer_apply_canvas_clip, &cd);
+	wlr_scene_node_for_each_buffer(&c->scene_surface->node,
+								   scene_buffer_apply_canvas_clip, &cd);
 }
 
 static void scene_buffer_apply_zoom(struct wlr_scene_buffer *buffer, int32_t sx,
@@ -1119,6 +1126,7 @@ void client_apply_clip(Client *c, float factor) {
 		set_client_corner_location(c);
 
 	if (!config.animations && !c->overview_scene_surface) {
+		client_fx_settle(c);
 		c->animation.running = false;
 		c->need_output_flush = false;
 		c->animainit_geom = c->current = c->pending = c->animation.current =
@@ -1129,8 +1137,7 @@ void client_apply_clip(Client *c, float factor) {
 			apply_border(c);
 			client_draw_shadow(c);
 			float ez = get_client_effective_zoom(c);
-			wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node,
-											   NULL);
+			wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, NULL);
 			apply_canvas_clip_and_zoom(c, ez, current_corner_location);
 			return;
 		}
@@ -1151,8 +1158,7 @@ void client_apply_clip(Client *c, float factor) {
 			if (noanim_zoom != 1.0f) {
 				clip_box.x = (int32_t)roundf(clip_box.x * noanim_zoom);
 				clip_box.y = (int32_t)roundf(clip_box.y * noanim_zoom);
-				clip_box.width =
-					(int32_t)roundf(clip_box.width * noanim_zoom);
+				clip_box.width = (int32_t)roundf(clip_box.width * noanim_zoom);
 				clip_box.height =
 					(int32_t)roundf(clip_box.height * noanim_zoom);
 			}
@@ -1207,10 +1213,10 @@ void client_apply_clip(Client *c, float factor) {
 	// 如果窗口剪切区域已经剪切到0，则不渲染窗口表面
 	if (clip_box.width <= 0 || clip_box.height <= 0) {
 		should_render_client_surface = false;
-		wlr_scene_node_set_enabled(&c->scene_surface->node, false);
+		client_surface_set_enabled(c, false);
 	} else {
 		should_render_client_surface = true;
-		wlr_scene_node_set_enabled(&c->scene_surface->node, true);
+		client_surface_set_enabled(c, true);
 	}
 
 	// 不用在执行下面的窗口表面剪切和缩放等效果操作
@@ -1224,8 +1230,7 @@ void client_apply_clip(Client *c, float factor) {
 			clip_box.x = (int32_t)roundf(clip_box.x * clip_zoom);
 			clip_box.y = (int32_t)roundf(clip_box.y * clip_zoom);
 			clip_box.width = (int32_t)roundf(clip_box.width * clip_zoom);
-			clip_box.height =
-				(int32_t)roundf(clip_box.height * clip_zoom);
+			clip_box.height = (int32_t)roundf(clip_box.height * clip_zoom);
 		}
 	}
 
@@ -1236,8 +1241,7 @@ void client_apply_clip(Client *c, float factor) {
 
 	// 获取剪切后的表面的实际大小用于计算缩放
 	int32_t acutal_surface_width = geometry.width - offset.x - offset.width;
-	int32_t acutal_surface_height =
-		geometry.height - offset.y - offset.height;
+	int32_t acutal_surface_height = geometry.height - offset.y - offset.height;
 
 	if (acutal_surface_width <= 0 || acutal_surface_height <= 0)
 		return;
@@ -1323,12 +1327,88 @@ void fadeout_client_animation_next_tick(Client *c) {
 			&c->scene->node, snap_scene_buffer_apply_effect, &buffer_data);
 	}
 
+	client_fx_tick(c, MANGO_MIN(animation_passed, 1.0), passed_time);
+
 	if (animation_passed >= 1.0) {
+		client_fx_settle(c);
 		wl_list_remove(&c->fadeout_link);
 		wlr_scene_node_destroy(&c->scene->node);
 		free(c);
 		c = NULL;
 	}
+}
+
+static void client_fx_settle(Client *c) {
+	if (!c || !c->fx.active)
+		return;
+	if (c->fx.scene_buffer)
+		wlr_scene_node_destroy(&c->fx.scene_buffer->node);
+	if (c->fx.src)
+		wlr_texture_destroy(c->fx.src);
+	if (c->fx.swap)
+		wlr_swapchain_destroy(c->fx.swap);
+	c->fx.scene_buffer = NULL;
+	c->fx.src = NULL;
+	c->fx.swap = NULL;
+	c->fx.shader = NULL;
+	c->fx.active = false;
+	if (c->scene_surface)
+		wlr_scene_node_set_enabled(&c->scene_surface->node, true);
+}
+
+static bool client_fx_begin(Client *c, struct effect_shader *shader,
+							struct wlr_scene_node *flatten_root,
+							struct wlr_scene_tree *parent, int width,
+							int height) {
+	struct wlr_buffer *flat = effect_pass_flatten(flatten_root, width, height);
+	if (!flat) {
+		wlr_log(WLR_ERROR,
+				"effect_pass: fx setup failed (effect_pass_flatten), "
+				"falling back to parametric animation");
+		return false;
+	}
+	struct wlr_texture *src = wlr_texture_from_buffer(drw, flat);
+	struct wlr_swapchain *swap =
+		src ? effect_pass_create_swapchain(width, height) : NULL;
+	struct wlr_scene_buffer *scene_buffer =
+		swap ? wlr_scene_buffer_create(parent, NULL) : NULL;
+	wlr_buffer_drop(flat);
+	if (!scene_buffer) {
+		if (src)
+			wlr_texture_destroy(src);
+		if (swap)
+			wlr_swapchain_destroy(swap);
+		wlr_log(WLR_ERROR,
+				"effect_pass: fx setup failed (%s), falling back to "
+				"parametric animation",
+				!src	? "wlr_texture_from_buffer"
+				: !swap ? "effect_pass_create_swapchain"
+						: "wlr_scene_buffer_create");
+		return false;
+	}
+	c->fx.active = true;
+	c->fx.shader = shader;
+	c->fx.src = src;
+	c->fx.swap = swap;
+	c->fx.scene_buffer = scene_buffer;
+	c->fx.width = width;
+	c->fx.height = height;
+	return true;
+}
+
+static void client_fx_tick(Client *c, float progress, int32_t passed_time) {
+	if (!c->fx.active || !c->fx.swap)
+		return;
+	struct wlr_buffer *dst = wlr_swapchain_acquire(c->fx.swap);
+	if (!dst)
+		return;
+	struct effect_uniforms u = {
+		.progress = progress,
+		.time = (float)passed_time / 1000.0f,
+	};
+	if (effect_pass_run(c->fx.shader, c->fx.src, dst, u))
+		wlr_scene_buffer_set_buffer(c->fx.scene_buffer, dst);
+	wlr_buffer_unlock(dst);
 }
 
 void client_animation_next_tick(Client *c) {
@@ -1368,9 +1448,37 @@ void client_animation_next_tick(Client *c) {
 
 	c->is_pending_open_animation = false;
 
+	if (c->animation.action == OPEN && c->animation.running &&
+		!c->fx.open_setup_done && !c->fx.active && c->scene &&
+		c->scene->node.enabled && c->scene_surface) {
+		struct wlr_box fx_sgeom;
+		client_get_geometry(c, &fx_sgeom);
+		bool fx_size_ready = fx_sgeom.width >= c->geom.width - 2 * (int)c->bw &&
+							 fx_sgeom.height >= c->geom.height - 2 * (int)c->bw;
+		if (fx_size_ready || animation_passed > 0.33)
+			c->fx.open_setup_done = true;
+		struct effect_shader *fx_shader =
+			fx_size_ready ? pick_effect(c->effect_open, config.effect_open)
+						  : NULL;
+		if (fx_shader) {
+			struct wlr_box fx_clip;
+			client_get_clip(c, &fx_clip);
+			wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node,
+											   &fx_clip);
+			if (client_fx_begin(c, fx_shader, &c->scene->node, c->scene,
+								c->geom.width, c->geom.height)) {
+				wlr_scene_node_set_enabled(&c->scene_surface->node, false);
+				wlr_log(WLR_DEBUG,
+						"effect_pass: open-fade shader active for client");
+			}
+		}
+	}
+
 	client_apply_clip(c, factor);
+	client_fx_tick(c, 1.0 - MANGO_MIN(animation_passed, 1.0), passed_time);
 
 	if (animation_passed >= 1.0) {
+		client_fx_settle(c);
 
 		// clear the open action state
 		// To prevent him from being mistaken that
@@ -1404,10 +1512,9 @@ void client_animation_next_tick(Client *c) {
 }
 
 void init_fadeout_client(Client *c) {
-
+	client_fx_settle(c);
 	if (!c->mon || client_is_unmanaged(c))
 		return;
-
 	if (!c->scene) {
 		return;
 	}
@@ -1434,6 +1541,17 @@ void init_fadeout_client(Client *c) {
 	if (!fadeout_client->scene) {
 		free(fadeout_client);
 		return;
+	}
+
+	struct effect_shader *fx_shader =
+		pick_effect(c->effect_close, config.effect_close);
+	if (fx_shader &&
+		client_fx_begin(fadeout_client, fx_shader, &fadeout_client->scene->node,
+						layers[LyrFadeOut], c->geom.width, c->geom.height)) {
+		wlr_scene_node_set_enabled(&fadeout_client->scene->node, false);
+		wlr_scene_node_set_position(&fadeout_client->fx.scene_buffer->node,
+									c->geom.x, c->geom.y);
+		wlr_log(WLR_DEBUG, "effect_pass: close-fade shader active for client");
 	}
 
 	fadeout_client->animation.duration = config.animation_duration_close;
@@ -1486,7 +1604,8 @@ void init_fadeout_client(Client *c) {
 	}
 
 	fadeout_client->animation.time_started = get_now_in_ms();
-	wlr_scene_node_set_enabled(&fadeout_client->scene->node, true);
+	if (!fadeout_client->fx.active)
+		wlr_scene_node_set_enabled(&fadeout_client->scene->node, true);
 	wl_list_insert(&fadeout_clients, &fadeout_client->fadeout_link);
 
 	// 请求刷新屏幕
@@ -1570,6 +1689,10 @@ void resize(Client *c, struct wlr_box geo, int32_t interact) {
 	if (!c->mon)
 		return;
 
+	if (c->fx.active &&
+		(geo.width != c->fx.width || geo.height != c->fx.height))
+		client_fx_settle(c);
+
 	c->need_output_flush = true;
 	c->dirty = true;
 
@@ -1650,6 +1773,8 @@ void resize(Client *c, struct wlr_box geo, int32_t interact) {
 	}
 
 	if (c == grabc || c->snap_to_geom) {
+		client_fx_settle(c);
+
 		c->animation.running = false;
 		c->need_output_flush = false;
 
@@ -1848,12 +1973,16 @@ bool client_draw_frame(Client *c) {
 	if (!c || !client_surface(c)->mapped)
 		return false;
 
+	if (c->fx.active && !c->animation.running)
+		client_fx_settle(c);
+
 	bool need_flush = c->need_output_flush;
 
 	if (need_flush) {
 		if (config.animations && c->animation.running) {
 			client_animation_next_tick(c);
 		} else {
+			client_fx_settle(c);
 			wlr_scene_node_set_position(&c->scene->node, c->pending.x,
 										c->pending.y);
 			c->animation.current = c->animainit_geom = c->animation.initial =
@@ -1864,8 +1993,7 @@ bool client_draw_frame(Client *c) {
 	}
 
 	if ((need_flush || config.animations) && c->mon &&
-		is_canvas_layout(c->mon) && !c->isfullscreen &&
-		!c->ismaximizescreen) {
+		is_canvas_layout(c->mon) && !c->isfullscreen && !c->ismaximizescreen) {
 		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, NULL);
 		client_apply_clip(c, 1.0);
 	}
