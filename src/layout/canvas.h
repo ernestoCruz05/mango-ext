@@ -178,6 +178,7 @@ static void canvas_reposition(Monitor *m) {
 			m->w.y + (int32_t)roundf((c->canvas_geom[tag].y - pan_y) * zoom);
 
 		if (c->animation.running) {
+			client_fx_settle(c);
 			c->animation.running = false;
 			c->need_output_flush = false;
 		}

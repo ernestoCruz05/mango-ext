@@ -50,7 +50,7 @@ void set_arrange_visible(Monitor *m, Client *c, bool want_animation) {
 		c->is_clip_to_hide = false;
 		c->is_monocle_hide = false;
 		wlr_scene_node_set_enabled(&c->scene->node, true);
-		wlr_scene_node_set_enabled(&c->scene_surface->node, true);
+		client_surface_set_enabled(c, true);
 	}
 
 	if (!c->animation.tag_from_rule && want_animation &&
@@ -119,6 +119,7 @@ void set_arrange_hidden(Monitor *m, Client *c, bool want_animation) {
 		c->animation.tagining = false;
 		set_tagout_animation(m, c);
 	} else {
+		client_fx_settle(c);
 		c->animation.running = false;
 		wlr_scene_node_set_enabled(&c->scene->node, false);
 		c->animainit_geom = c->current = c->pending = c->animation.current =
