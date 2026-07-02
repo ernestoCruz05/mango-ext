@@ -33,6 +33,23 @@ static inline void tag_scrub_unstage(Monitor *m) {
 	m->scrub_rubberband = false;
 }
 
+/*
+ * mango lays out tags lazily: a tag a window was moved off keeps stale geometry
+ * until it is viewed. A scrub previews an *unviewed* tag, so we must refresh
+ * its tiled geometry out-of-band.
+ */
+static inline void tag_scrub_refresh_target_geometry(Monitor *m, int target) {
+	uint32_t saved_curtag = m->pertag->curtag;
+	uint32_t saved_tagset = m->tagset[m->seltags];
+	m->pertag->curtag = (uint32_t)target;
+	m->tagset[m->seltags] = (1u << (target - 1));
+	pre_caculate_before_arrange(m, false, false, true);
+	m->pertag->ltidxs[target]->arrange(m);
+	m->pertag->curtag = saved_curtag;
+	m->tagset[m->seltags] = saved_tagset;
+	pre_caculate_before_arrange(m, false, false, true);
+}
+
 static inline void tag_scrub_stage(Monitor *m, int dir) {
 	int curtag = (int)m->pertag->curtag;
 	int ntags = LENGTH(tags);
@@ -50,22 +67,7 @@ static inline void tag_scrub_stage(Monitor *m, int dir) {
 	m->scrub_rubberband = false;
 	m->scrub_incoming_tag = (uint32_t)target;
 
-	/* Mango lays out tags lazily: a tag you moved a window off of
-	 * keeps stale window geometry until it's viewed. This is very annoying
-	 * Here i try to predict the arrangement of the tag just so the tags don't
-	 * appear miss-aligned in the scrub.
-	 * */
-	{
-		uint32_t saved_curtag = m->pertag->curtag;
-		uint32_t saved_tagset = m->tagset[m->seltags];
-		m->pertag->curtag = (uint32_t)target;
-		m->tagset[m->seltags] = (1u << (target - 1));
-		pre_caculate_before_arrange(m, false, false, true);
-		m->pertag->ltidxs[target]->arrange(m);
-		m->pertag->curtag = saved_curtag;
-		m->tagset[m->seltags] = saved_tagset;
-		pre_caculate_before_arrange(m, false, false, true);
-	}
+	tag_scrub_refresh_target_geometry(m, target);
 
 	Client *c;
 	uint32_t inbit = 1u << (target - 1);
@@ -91,7 +93,8 @@ static inline void tag_scrub_apply(Monitor *m, double progress) {
 		progress = 1.0;
 	m->scrub_progress = progress;
 
-	double eff = m->scrub_rubberband ? progress * 0.2 : progress;
+	double eased = find_animation_curve_at(progress, TAG);
+	double eff = m->scrub_rubberband ? eased * 0.2 : eased;
 	Client *c;
 	uint32_t inbit =
 		m->scrub_incoming_tag ? (1u << (m->scrub_incoming_tag - 1)) : 0;
@@ -209,23 +212,20 @@ static inline void tag_scrub_feed(Monitor *m, double dx, double dy,
 	int dir = (m->scrub_accum > 0) ? +1 : (m->scrub_accum < 0 ? -1 : 0);
 	double signed_p = tag_scrub_progress(m->scrub_accum, dim);
 	double mag_p = signed_p < 0 ? -signed_p : signed_p;
-
-	if (!config.animations) {
-		m->scrub_dir = (int8_t)dir;
-		uint32_t mask = tag_scrub_occupied_mask(m);
-		int target =
-			tag_scrub_neighbor((int)m->pertag->curtag, dir, LENGTH(tags), mask,
-							   m->scrub_have_client, config.tag_carousel);
-		m->scrub_rubberband = (dir != 0 && target == 0);
-		m->scrub_incoming_tag = 0;
-		tag_scrub_apply(m, mag_p);
-		return;
-	}
-
 	if (dir != 0 && dir != m->scrub_dir) {
-		if (m->scrub_incoming_tag || m->scrub_rubberband)
-			tag_scrub_unstage(m);
-		tag_scrub_stage(m, dir);
+		if (config.animations) {
+			if (m->scrub_incoming_tag || m->scrub_rubberband)
+				tag_scrub_unstage(m);
+			tag_scrub_stage(m, dir);
+		} else {
+			uint32_t mask = tag_scrub_occupied_mask(m);
+			int target = tag_scrub_neighbor(
+				(int)m->pertag->curtag, dir, LENGTH(tags), mask,
+				m->scrub_have_client, config.tag_carousel);
+			m->scrub_dir = (int8_t)dir;
+			m->scrub_rubberband = (target == 0);
+			m->scrub_incoming_tag = 0;
+		}
 	}
 	tag_scrub_apply(m, mag_p);
 }
@@ -235,11 +235,13 @@ static inline void tag_scrub_release(Monitor *m, bool cancelled) {
 		return;
 
 	double oriented_v = m->scrub_velocity * (double)m->scrub_dir;
+	bool has_target =
+		config.animations ? (m->scrub_incoming_tag != 0) : (m->scrub_dir != 0);
+	bool commit = !cancelled && !m->scrub_rubberband && has_target &&
+				  gesture_scrub_should_commit(m->scrub_progress, oriented_v,
+											  config.gesture_commit_ratio);
 
 	if (!config.animations) {
-		bool commit = !cancelled && m->scrub_dir != 0 && !m->scrub_rubberband &&
-					  gesture_scrub_should_commit(m->scrub_progress, oriented_v,
-												  config.gesture_commit_ratio);
 		int target = 0;
 		if (commit) {
 			uint32_t mask = tag_scrub_occupied_mask(m);
@@ -252,10 +254,6 @@ static inline void tag_scrub_release(Monitor *m, bool cancelled) {
 		else
 			arrange(m, true, true);
 	} else {
-		bool commit = !cancelled && !m->scrub_rubberband &&
-					  m->scrub_incoming_tag &&
-					  gesture_scrub_should_commit(m->scrub_progress, oriented_v,
-												  config.gesture_commit_ratio);
 		if (commit) {
 			uint32_t inbit = 1u << (m->scrub_incoming_tag - 1);
 			uint32_t curbit = 1u << (m->pertag->curtag - 1);
