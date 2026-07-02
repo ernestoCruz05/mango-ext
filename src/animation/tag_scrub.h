@@ -41,12 +41,15 @@ static inline void tag_scrub_unstage(Monitor *m) {
 static inline void tag_scrub_refresh_target_geometry(Monitor *m, int target) {
 	uint32_t saved_curtag = m->pertag->curtag;
 	uint32_t saved_tagset = m->tagset[m->seltags];
+	Client *saved_sel = m->sel;
 	m->pertag->curtag = (uint32_t)target;
 	m->tagset[m->seltags] = (1u << (target - 1));
+	m->sel = focustop(m);
 	pre_caculate_before_arrange(m, false, false, true);
 	m->pertag->ltidxs[target]->arrange(m);
 	m->pertag->curtag = saved_curtag;
 	m->tagset[m->seltags] = saved_tagset;
+	m->sel = saved_sel;
 	pre_caculate_before_arrange(m, false, false, true);
 }
 
