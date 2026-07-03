@@ -291,12 +291,20 @@ struct effect_shader *effect_pass_get(const char *name) {
 	return NULL;
 }
 
+bool effect_pass_texture_usable(struct wlr_texture *src) {
+	if (!src || !wlr_texture_is_fx(src))
+		return false;
+	struct fx_texture_attribs sa;
+	fx_texture_get_attribs(src, &sa);
+	return sa.target == GL_TEXTURE_2D;
+}
+
 bool effect_pass_run(struct effect_shader *shader, struct wlr_texture *src,
 					 struct wlr_buffer *dst, struct effect_uniforms u) {
 	if (!state.ready || !shader || !src || !dst)
 		return false;
 	struct fx_texture_attribs sa;
-	if (!wlr_texture_is_fx(src))
+	if (!effect_pass_texture_usable(src))
 		return false;
 	fx_texture_get_attribs(src, &sa);
 	GLuint fbo = fx_renderer_get_buffer_fbo(state.renderer, dst);
@@ -309,6 +317,9 @@ bool effect_pass_run(struct effect_shader *shader, struct wlr_texture *src,
 	EGLDisplay prev_dpy = eglGetCurrentDisplay();
 	eglMakeCurrent(state.egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE,
 				   state.egl_context);
+
+	while (glGetError() != GL_NO_ERROR)
+		;
 
 	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 	glViewport(0, 0, dst->width, dst->height);
@@ -324,10 +335,14 @@ bool effect_pass_run(struct effect_shader *shader, struct wlr_texture *src,
 
 	static const GLfloat pos[] = {-1, -1, 1, -1, -1, 1, 1, 1};
 	static const GLfloat uv[] = {0, 0, 1, 0, 0, 1, 1, 1};
-	glVertexAttribPointer(shader->loc_pos, 2, GL_FLOAT, GL_FALSE, 0, pos);
-	glEnableVertexAttribArray(shader->loc_pos);
-	glVertexAttribPointer(shader->loc_uv, 2, GL_FLOAT, GL_FALSE, 0, uv);
-	glEnableVertexAttribArray(shader->loc_uv);
+	if (shader->loc_pos >= 0) {
+		glVertexAttribPointer(shader->loc_pos, 2, GL_FLOAT, GL_FALSE, 0, pos);
+		glEnableVertexAttribArray(shader->loc_pos);
+	}
+	if (shader->loc_uv >= 0) {
+		glVertexAttribPointer(shader->loc_uv, 2, GL_FLOAT, GL_FALSE, 0, uv);
+		glEnableVertexAttribArray(shader->loc_uv);
+	}
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(sa.target, sa.tex);
@@ -339,8 +354,10 @@ bool effect_pass_run(struct effect_shader *shader, struct wlr_texture *src,
 	glUniform2f(shader->loc_size, (float)dst->width, (float)dst->height);
 
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-	glDisableVertexAttribArray(shader->loc_pos);
-	glDisableVertexAttribArray(shader->loc_uv);
+	if (shader->loc_pos >= 0)
+		glDisableVertexAttribArray(shader->loc_pos);
+	if (shader->loc_uv >= 0)
+		glDisableVertexAttribArray(shader->loc_uv);
 	glBindTexture(sa.target, 0);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glUseProgram(0);
@@ -409,7 +426,8 @@ static void effect_flatten_bounds(struct wlr_scene_node *node, int *min_x,
 }
 
 static void effect_flatten_paint(struct wlr_scene_node *node,
-								 struct wlr_render_pass *pass, int ox, int oy) {
+								 struct wlr_render_pass *pass, int ox, int oy,
+								 bool include_rects) {
 	if (!node->enabled) {
 		return;
 	}
@@ -446,6 +464,8 @@ static void effect_flatten_paint(struct wlr_scene_node *node,
 		break;
 	}
 	case WLR_SCENE_NODE_RECT: {
+		if (!include_rects)
+			break;
 		struct wlr_scene_rect *r = wlr_scene_rect_from_node(node);
 		wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options){
 										   .box = {.x = nx,
@@ -461,7 +481,7 @@ static void effect_flatten_paint(struct wlr_scene_node *node,
 		struct wlr_scene_tree *tree = wlr_scene_tree_from_node(node);
 		struct wlr_scene_node *child;
 		wl_list_for_each(child, &tree->children, link) {
-			effect_flatten_paint(child, pass, ox, oy);
+			effect_flatten_paint(child, pass, ox, oy, include_rects);
 		}
 		break;
 	}
@@ -472,7 +492,7 @@ static void effect_flatten_paint(struct wlr_scene_node *node,
 }
 
 struct wlr_buffer *effect_pass_flatten(struct wlr_scene_node *node, int width,
-									   int height) {
+									   int height, bool include_rects) {
 	if (!state.ready || !node || width <= 0 || height <= 0) {
 		return NULL;
 	}
@@ -503,7 +523,7 @@ struct wlr_buffer *effect_pass_flatten(struct wlr_scene_node *node, int width,
 	if (!found) {
 		wlr_scene_node_coords(node, &ox, &oy);
 	}
-	effect_flatten_paint(node, pass, ox, oy);
+	effect_flatten_paint(node, pass, ox, oy, include_rects);
 
 	if (!wlr_render_pass_submit(pass)) {
 		wlr_buffer_drop(dst);

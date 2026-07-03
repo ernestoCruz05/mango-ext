@@ -391,6 +391,8 @@ struct Client {
 	struct {
 		bool active;
 		bool open_setup_done;
+		bool fadeout; /* fadeout holder: no scene_surface, settle re-enables
+						 scene->node instead */
 		struct effect_shader *shader;
 		struct wlr_scene_buffer *scene_buffer;
 		struct wlr_swapchain *swap;
@@ -445,8 +447,8 @@ struct Client {
 
 	const char *animation_type_open;
 	const char *animation_type_close;
-	const char *effect_open;
-	const char *effect_close;
+	char effect_open[64];
+	char effect_close[64];
 	int32_t is_in_scratchpad;
 	int32_t iscustomsize;
 	int32_t iscustompos;
@@ -1047,7 +1049,7 @@ static void client_surface_set_enabled(Client *c, bool enabled);
 static bool client_fx_begin(Client *c, struct effect_shader *shader,
 							struct wlr_scene_node *flatten_root,
 							struct wlr_scene_tree *parent, int width,
-							int height);
+							int height, bool include_rects);
 static void client_fx_tick(Client *c, float progress, int32_t passed_time);
 static struct effect_shader *pick_effect(const char *per_client,
 										 const char *global) {
@@ -1055,9 +1057,11 @@ static struct effect_shader *pick_effect(const char *per_client,
 					   : (global && global[0])		 ? global
 													 : NULL;
 	struct effect_shader *sh = name ? effect_pass_get(name) : NULL;
-	wlr_log(WLR_INFO, "pick_effect: per='%s' global='%s' -> name='%s' found=%d",
-			per_client ? per_client : "(null)", global ? global : "(null)",
-			name ? name : "(none)", sh != NULL);
+	if (name && !sh)
+		wlr_log(WLR_DEBUG,
+				"effect_pass: shader '%s' not found, using "
+				"parametric animation",
+				name);
 	return sh;
 }
 
@@ -1498,6 +1502,8 @@ void swallow(Client *c, Client *w) {
 		w->foreign_toplevel = NULL;
 	}
 
+	client_fx_settle(w);
+	client_fx_settle(c);
 	wlr_scene_node_set_enabled(&w->scene->node, false);
 	wlr_scene_node_set_enabled(&c->scene->node, true);
 	wlr_scene_node_set_enabled(&c->scene_surface->node, true);
@@ -1663,24 +1669,10 @@ void gpureset(struct wl_listener *listener, void *data) {
 	if (!(alloc = wlr_allocator_autocreate(backend, drw)))
 		die("couldn't recreate allocator");
 
-	wl_list_for_each_safe(fxc, fxtmp, &fadeout_clients, fadeout_link) {
-		if (!fxc->fx.active)
-			continue;
-		if (fxc->fx.src)
-			wlr_texture_destroy(fxc->fx.src);
-		if (fxc->fx.swap)
-			wlr_swapchain_destroy(fxc->fx.swap);
-		if (fxc->fx.scene_buffer)
-			wlr_scene_node_destroy(&fxc->fx.scene_buffer->node);
-		wlr_scene_node_set_enabled(&fxc->scene->node, true);
-		fxc->fx.active = false;
-		fxc->fx.shader = NULL;
-		fxc->fx.src = NULL;
-		fxc->fx.swap = NULL;
-		fxc->fx.scene_buffer = NULL;
-	}
+	wl_list_for_each_safe(fxc, fxtmp, &fadeout_clients, fadeout_link)
+		client_fx_settle(fxc);
 
-	wl_list_for_each_safe(oc, octmp, &clients, link) { client_fx_settle(oc); }
+	wl_list_for_each_safe(oc, octmp, &clients, link) client_fx_settle(oc);
 
 	effect_pass_finish();
 	effect_pass_init(drw, alloc);
@@ -1816,8 +1808,11 @@ static void apply_rule_properties(Client *c, const ConfigWinRule *r) {
 
 	APPLY_STRING_PROP(c, r, animation_type_open);
 	APPLY_STRING_PROP(c, r, animation_type_close);
-	APPLY_STRING_PROP(c, r, effect_open);
-	APPLY_STRING_PROP(c, r, effect_close);
+	if (r->effect_open)
+		snprintf(c->effect_open, sizeof(c->effect_open), "%s", r->effect_open);
+	if (r->effect_close)
+		snprintf(c->effect_close, sizeof(c->effect_close), "%s",
+				 r->effect_close);
 }
 
 void set_float_malposition(Client *tc) {
@@ -7907,6 +7902,8 @@ void overview_backup_surface(Client *c) {
 	if (c->overview_scene_surface) {
 		return;
 	}
+
+	client_fx_settle(c);
 
 	struct wlr_box geometry;
 	client_get_geometry(c, &geometry);

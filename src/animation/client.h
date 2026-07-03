@@ -1352,15 +1352,21 @@ static void client_fx_settle(Client *c) {
 	c->fx.swap = NULL;
 	c->fx.shader = NULL;
 	c->fx.active = false;
-	if (c->scene_surface)
+	if (c->fx.fadeout) {
+		if (c->scene)
+			wlr_scene_node_set_enabled(&c->scene->node, true);
+		return;
+	}
+	if (c->scene_surface && !c->is_clip_to_hide && !c->is_monocle_hide)
 		wlr_scene_node_set_enabled(&c->scene_surface->node, true);
 }
 
 static bool client_fx_begin(Client *c, struct effect_shader *shader,
 							struct wlr_scene_node *flatten_root,
 							struct wlr_scene_tree *parent, int width,
-							int height) {
-	struct wlr_buffer *flat = effect_pass_flatten(flatten_root, width, height);
+							int height, bool include_rects) {
+	struct wlr_buffer *flat =
+		effect_pass_flatten(flatten_root, width, height, include_rects);
 	if (!flat) {
 		wlr_log(WLR_ERROR,
 				"effect_pass: fx setup failed (effect_pass_flatten), "
@@ -1368,6 +1374,14 @@ static bool client_fx_begin(Client *c, struct effect_shader *shader,
 		return false;
 	}
 	struct wlr_texture *src = wlr_texture_from_buffer(drw, flat);
+	if (src && !effect_pass_texture_usable(src)) {
+		wlr_texture_destroy(src);
+		wlr_buffer_drop(flat);
+		wlr_log(WLR_ERROR,
+				"effect_pass: snapshot texture is not shader-compatible "
+				"(external-only import), falling back to parametric animation");
+		return false;
+	}
 	struct wlr_swapchain *swap =
 		src ? effect_pass_create_swapchain(width, height) : NULL;
 	struct wlr_scene_buffer *scene_buffer =
@@ -1406,9 +1420,15 @@ static void client_fx_tick(Client *c, float progress, int32_t passed_time) {
 		.progress = progress,
 		.time = (float)passed_time / 1000.0f,
 	};
-	if (effect_pass_run(c->fx.shader, c->fx.src, dst, u))
+	bool ok = effect_pass_run(c->fx.shader, c->fx.src, dst, u);
+	if (ok)
 		wlr_scene_buffer_set_buffer(c->fx.scene_buffer, dst);
 	wlr_buffer_unlock(dst);
+	if (!ok) {
+		wlr_log(WLR_ERROR, "effect_pass: shader pass failed, falling back to "
+						   "parametric animation");
+		client_fx_settle(c);
+	}
 }
 
 void client_animation_next_tick(Client *c) {
@@ -1466,7 +1486,7 @@ void client_animation_next_tick(Client *c) {
 			wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node,
 											   &fx_clip);
 			if (client_fx_begin(c, fx_shader, &c->scene->node, c->scene,
-								c->geom.width, c->geom.height)) {
+								c->geom.width, c->geom.height, false)) {
 				wlr_scene_node_set_enabled(&c->scene_surface->node, false);
 				wlr_log(WLR_DEBUG,
 						"effect_pass: open-fade shader active for client");
@@ -1545,9 +1565,11 @@ void init_fadeout_client(Client *c) {
 
 	struct effect_shader *fx_shader =
 		pick_effect(c->effect_close, config.effect_close);
+	fadeout_client->fx.fadeout = true;
 	if (fx_shader &&
 		client_fx_begin(fadeout_client, fx_shader, &fadeout_client->scene->node,
-						layers[LyrFadeOut], c->geom.width, c->geom.height)) {
+						layers[LyrFadeOut], c->geom.width, c->geom.height,
+						true)) {
 		wlr_scene_node_set_enabled(&fadeout_client->scene->node, false);
 		wlr_scene_node_set_position(&fadeout_client->fx.scene_buffer->node,
 									c->geom.x, c->geom.y);

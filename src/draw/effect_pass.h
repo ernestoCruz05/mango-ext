@@ -21,8 +21,9 @@ void effect_pass_load_dir(const char *dir);
 struct effect_shader *effect_pass_get(const char *name);
 bool effect_pass_run(struct effect_shader *shader, struct wlr_texture *src,
 					 struct wlr_buffer *dst, struct effect_uniforms u);
+bool effect_pass_texture_usable(struct wlr_texture *src);
 struct wlr_buffer *effect_pass_flatten(struct wlr_scene_node *node, int width,
-									   int height);
+									   int height, bool include_rects);
 struct wlr_swapchain *effect_pass_create_swapchain(int width, int height);
 
 #endif
