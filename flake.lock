@@ -41,11 +41,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1783279667,
-        "narHash": "sha256-/NAkDSsve+GNM0Bt6tleJdCGfsTlK89nPjkVOzZMo0s=",
+        "lastModified": 1784555310,
+        "narHash": "sha256-/FCliTPgiuV1owejZFNx3Ch9irdvkOfOFl+HHZ+DrtM=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "f205b5574fd0cb7da5b702a2da51507b7f4fdd1b",
+        "rev": "421eebfd0ec7bccd4abe826ce62d7e6e83129493",
         "type": "github"
       },
       "original": {
@@ -86,11 +86,11 @@
         "systems": "systems"
       },
       "locked": {
-        "lastModified": 1782624992,
-        "narHash": "sha256-vUjLG6eubEhJJVa9LPygIcVmNoHwYbSUTJcWEcbxnU4=",
+        "lastModified": 1783958132,
+        "narHash": "sha256-XcYjecZ0xIoJqib0YAn2PZNXyHLOiG4G6J3xKqknNzs=",
         "owner": "wlrfx",
         "repo": "scenefx",
-        "rev": "37ccd723bef49e6891156ffafce8f549f01446cc",
+        "rev": "45c69780fc4fe5b9db0c3a1bac2521360b4538fb",
         "type": "github"
       },
       "original": {
