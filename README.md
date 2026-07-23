@@ -12,7 +12,7 @@
 
 </div>
 
-> **Fork notice:** this is `mango-ext`, a fork of [mangowm/mango](https://github.com/mangowm/mango) with additional canvas/zoom, dwindle, and touchscreen features. It installs as the binary `mango-ext` and reads its config from `~/.config/mango-ext/` (system fallback `/etc/mango-ext/config.conf`), so it can live side-by-side with an upstream `mango` install from your package manager.
+> **Fork notice:** i have been burned out of this project for a while due to the limitations of working with the mango codebase, so im archiving it and continuing to work in my own WM. Check WeraPea's fork for touch monitor support
 
 ---
 
